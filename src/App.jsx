@@ -168,6 +168,20 @@ async function loadStore(){
           return b;
         });
       }
+      // ── MIGRATION v3: sales status → totalAmount / paidAmount ──
+      if(Array.isArray(parsed.sales)){
+        parsed.sales = parsed.sales.map(s=>{
+          if(s.totalAmount === undefined){
+            const amt = s.amount || 0;
+            return {
+              ...s,
+              totalAmount: amt,
+              paidAmount: s.status === "paid" ? amt : (s.status === "reserved" ? 0 : 0),
+            };
+          }
+          return s;
+        });
+      }
       return { ...defaults, ...parsed };
     }
   }catch(e){}
@@ -285,14 +299,31 @@ function TextArea({label,value,onChange,onBlur,rows=3}){
   );
 }
 
-function Badge({status}){
-  const m = {paid:[C.ok,"PAGADO"],pending:[C.warn,"PENDIENTE"],reserved:[C.gold,"SEPARADO"]};
-  const [color,label] = m[status]||[C.dim,status];
+function Badge({totalAmount,paidAmount}){
+  const total = totalAmount||0;
+  const paid  = paidAmount||0;
+  let color, label;
+  if(paid >= total && total > 0){ color=C.ok;   label="PAGADO"; }
+  else if(paid > 0)             { color=C.warn;  label="PARCIAL"; }
+  else                          { color=C.warn;  label="PENDIENTE"; }
   return(
     <span style={{fontSize:8,letterSpacing:"0.1em",fontWeight:700,color,
       background:`${color}18`,padding:"3px 7px",borderRadius:2,whiteSpace:"nowrap"}}>
       {label}
     </span>
+  );
+}
+
+// Mini payment progress bar shown under sale row
+function PayBar({totalAmount,paidAmount}){
+  const total = totalAmount||0;
+  const paid  = Math.min(paidAmount||0, total);
+  const pct   = total>0 ? (paid/total)*100 : 0;
+  const color = pct>=100 ? C.ok : pct>0 ? C.warn : C.brd;
+  return(
+    <div style={{height:2,background:C.brd,borderRadius:2,marginTop:3}}>
+      <div style={{height:"100%",background:color,borderRadius:2,width:`${pct}%`,transition:"width 0.3s"}}/>
+    </div>
   );
 }
 
@@ -327,18 +358,17 @@ function QuickSaleForm({inventory,settings,initial,submitLabel,onSubmit,onCancel
     return `${parseInt(d)} ${MESES[parseInt(m)-1]} ${y}`;
   };
   const [f,setF] = useState(()=>{
-    if(!initial) return {client:"",itemId:"",custom:"",amount:"",cost:"",kind:"sellada",status:"pending",dateISO:todayISO()};
-    // parse existing date label back to ISO best-effort, fall back to today
+    if(!initial) return {client:"",itemId:"",custom:"",amount:"",cost:"",paidAmount:"",kind:"sellada",dateISO:todayISO()};
     let dateISO = todayISO();
     if(initial.dateISO) dateISO = initial.dateISO;
     return {
       client: initial.client||"",
       itemId: initial.itemId!=null ? String(initial.itemId) : "",
       custom: initial.itemId!=null ? "" : (initial.product||""),
-      amount: String(initial.amount??""),
+      amount: String(initial.totalAmount??initial.amount??""),
       cost: String(initial.cost??""),
+      paidAmount: String(initial.paidAmount??""),
       kind: initial.kind==="otro" ? "otro" : "sellada",
-      status: initial.status||"pending",
       dateISO,
     };
   });
@@ -351,11 +381,15 @@ function QuickSaleForm({inventory,settings,initial,submitLabel,onSubmit,onCancel
 
   const submit = () => {
     if(!f.client.trim() || !(parseFloat(f.amount)>0)) return;
-    const amount = parseFloat(f.amount)||0;
+    const totalAmount = parseFloat(f.amount)||0;
+    const paidAmount  = Math.min(parseFloat(f.paidAmount)||0, totalAmount);
     const cost = parseFloat(f.cost)||0;
     const product = item ? `${item.name} (${f.kind==="sellada"?"Sellado":"Otro"})` : (f.custom.trim() || "Producto personalizado");
     onSubmit({
-      client:f.client.trim(), product, amount, status:f.status, kind:f.kind,
+      client:f.client.trim(), product,
+      totalAmount, paidAmount,
+      amount: totalAmount, // keep for backward compat with PaymentsView
+      kind:f.kind,
       itemId: item?item.id:null, cost,
       splitE: item?item.splitE:settings.splitDefault,
       dateISO: f.dateISO,
@@ -375,14 +409,14 @@ function QuickSaleForm({inventory,settings,initial,submitLabel,onSubmit,onCancel
         <Select label="PERFUME (OPCIONAL)" value={f.itemId}
           onChange={e=>pickItem(e.target.value)}
           options={[{value:"",label:"— Producto personalizado —"},...inventory.map(i=>({value:String(i.id),label:i.name}))]}/>
-        <Select label="ESTADO" value={f.status} onChange={e=>setF({...f,status:e.target.value})}
-          options={[{value:"pending",label:"Pendiente"},{value:"paid",label:"Pagado"},{value:"reserved",label:"Separado"}]}/>
+        <Field label="YA PAGADO (ABONO)" prefix="S/" value={f.paidAmount}
+          onChange={e=>setF({...f,paidAmount:e.target.value})}/>
       </div>
       {!f.itemId && (
         <Field label="DESCRIPCIÓN DEL PRODUCTO" type="text" value={f.custom} onChange={e=>setF({...f,custom:e.target.value})}/>
       )}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-        <Field label="MONTO (VENTA)" prefix="S/" value={f.amount} onChange={e=>setF({...f,amount:e.target.value})}/>
+        <Field label="MONTO TOTAL (VENTA)" prefix="S/" value={f.amount} onChange={e=>setF({...f,amount:e.target.value})}/>
         <Field label="COSTO" prefix="S/" value={f.cost} onChange={e=>setF({...f,cost:e.target.value})}/>
         <div>
           <div style={{fontSize:8,letterSpacing:"0.18em",color:C.dim,marginBottom:4,fontWeight:600}}>FECHA DE VENTA</div>
@@ -399,6 +433,20 @@ function QuickSaleForm({inventory,settings,initial,submitLabel,onSubmit,onCancel
           )}
         </div>
       </div>
+      {item && (
+        <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",borderRadius:3,
+          background: item.stock===0 ? `${C.err}15` : item.stock===1 ? `${C.warn}15` : `${C.ok}15`,
+          border:`1px solid ${item.stock===0?C.err:item.stock===1?C.warn:C.ok}44`}}>
+          <span style={{fontSize:9,fontWeight:700,color:item.stock===0?C.err:item.stock===1?C.warn:C.ok,letterSpacing:"0.08em"}}>
+            {item.stock===0 ? "⚠ SIN STOCK" : item.stock===1 ? "⚠ ÚLTIMO EN STOCK" : "✓ EN STOCK"}
+          </span>
+          <span style={{fontSize:9,color:C.dim}}>
+            {item.stock===0
+              ? "No quedan unidades disponibles de este perfume."
+              : `Quedan ${item.stock} unidad${item.stock!==1?"es":""} — esta venta descontará 1.`}
+          </span>
+        </div>
+      )}
       <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
         <button onClick={onCancel} style={btnGhost}>Cancelar</button>
         <button onClick={submit} style={btnGold}>{submitLabel||"Registrar venta"}</button>
@@ -408,7 +456,7 @@ function QuickSaleForm({inventory,settings,initial,submitLabel,onSubmit,onCancel
 }
 
 // ── DASHBOARD ───────────────────────────────────────────────────────────────
-function DashView({sim,setSim,inventory,sales,setSales,settings,setSettings}){
+function DashView({sim,setSim,inventory,sales,setSales,settings,setSettings,setInventory}){
   const [formMode,setFormMode] = useState(null); // null | {type:"add"} | {type:"edit", sale}
   const up = (f,v) => setSim(p=>({...p,[f]:v}));
   const mg = useMemo(()=>{
@@ -419,26 +467,73 @@ function DashView({sim,setSim,inventory,sales,setSales,settings,setSettings}){
   const critical = inventory.filter(i=>i.stock<=1);
   const valorInventario = inventory.reduce((a,i)=>a+i.cost*i.stock,0);
   const refsActivas = inventory.filter(i=>i.stock>0||i.decantMl>0).length;
-  const pendientes = sales.filter(s=>s.status!=="paid");
-  const cuentasXCobrar = pendientes.reduce((a,s)=>a+s.amount,0);
+  // Cuentas por cobrar = suma de (totalAmount - paidAmount) para todas las ventas con deuda pendiente
+  const cuentasXCobrar = sales.reduce((a,s)=>{
+    const total = s.totalAmount ?? s.amount ?? 0;
+    const paid  = s.paidAmount ?? (s.status==="paid" ? total : 0);
+    return a + Math.max(0, total - paid);
+  }, 0);
+  const pendientes = sales.filter(s=>{
+    const total = s.totalAmount ?? s.amount ?? 0;
+    const paid  = s.paidAmount ?? (s.status==="paid" ? total : 0);
+    return paid < total;
+  });
 
   const currentMonthAbbr = MESES[new Date().getMonth()];
   const isThisMonth = (dateStr) => (dateStr||"").trim().split(" ")[1]===currentMonthAbbr;
-  const paidThisMonth = useMemo(()=> sales.filter(s=>s.status==="paid" && isThisMonth(s.date)), [sales, currentMonthAbbr]);
-  const ingresosNetos = paidThisMonth.reduce((a,s)=>a+s.amount,0);
-  const margenMensual = paidThisMonth.reduce((a,s)=>a+(s.amount-(s.cost||0)),0);
+  // Ingresos = suma de lo efectivamente cobrado este mes
+  const paidThisMonth = useMemo(()=> sales.filter(s=> isThisMonth(s.date)), [sales, currentMonthAbbr]);
+  const ingresosNetos = paidThisMonth.reduce((a,s)=>a+(s.paidAmount ?? (s.status==="paid" ? (s.totalAmount??s.amount??0) : 0)),0);
+  const margenMensual = paidThisMonth.reduce((a,s)=>{
+    const cobrado = s.paidAmount ?? (s.status==="paid" ? (s.totalAmount??s.amount??0) : 0);
+    const total   = s.totalAmount ?? s.amount ?? 0;
+    const costFrac = total>0 ? (cobrado/total)*(s.cost||0) : 0;
+    return a + (cobrado - costFrac);
+  }, 0);
+
+  // AbonoPanelModal — inline panel to register a partial payment on a sale
+  const [abonoId, setAbonoId] = useState(null);
+  const [abonoVal, setAbonoVal] = useState("");
+
+  const submitAbono = () => {
+    const extra = parseFloat(abonoVal)||0;
+    if(extra<=0) return;
+    setSales(prev=>prev.map(s=>{
+      if(s.id!==abonoId) return s;
+      const total = s.totalAmount ?? s.amount ?? 0;
+      const newPaid = Math.min((s.paidAmount||0)+extra, total);
+      return {...s, paidAmount: newPaid,
+        status: newPaid >= total ? "paid" : "pending"};
+    }));
+    setAbonoId(null);
+    setAbonoVal("");
+  };
 
   const handleSubmitForm = (payload) => {
     if(formMode?.type==="edit"){
-      setSales(prev=>prev.map(s=>s.id===formMode.sale.id ? {...s, ...payload} : s));
+      setSales(prev=>prev.map(s=>s.id===formMode.sale.id ? {
+        ...s, ...payload,
+        status: (payload.paidAmount||0) >= (payload.totalAmount||payload.amount||0) ? "paid" : "pending",
+      } : s));
     } else {
+      const total = payload.totalAmount || payload.amount || 0;
+      const paid  = payload.paidAmount || 0;
       setSales(prev=>[{
         id:Date.now(), ml:null,
         paidToSocio:false, paidDate:null, settlementId:null,
+        status: paid >= total ? "paid" : "pending",
         date: payload.date || todayLabel(),
         dateISO: payload.dateISO || new Date().toISOString().slice(0,10),
         ...payload,
       }, ...prev]);
+
+      // ── FIX 3: Descontar 1 unidad del inventario cuando se registra una venta de botella sellada ──
+      if(payload.kind === "sellada" && payload.itemId){
+        setInventory(prev=>prev.map(i=> i.id===payload.itemId && i.stock>0
+          ? {...i, stock: i.stock-1}
+          : i
+        ));
+      }
     }
     setFormMode(null);
   };
@@ -464,8 +559,8 @@ function DashView({sim,setSim,inventory,sales,setSales,settings,setSettings}){
         </div>
         <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"16px 18px"}}>
           <div style={kpiLabelStyle}>CUENTAS × COBRAR</div>
-          <div style={{fontSize:24,fontWeight:200}}>{sol(cuentasXCobrar,0)}</div>
-          <div style={{marginTop:6,fontSize:9.5,color:C.dim}}>{pendientes.length} ventas pendientes/separadas</div>
+          <div style={{fontSize:24,fontWeight:200,color:cuentasXCobrar>0?C.warn:C.text}}>{sol(cuentasXCobrar,0)}</div>
+          <div style={{marginTop:6,fontSize:9.5,color:C.dim}}>{pendientes.length} venta{pendientes.length!==1?"s":""} con saldo pendiente</div>
         </div>
         <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"16px 18px"}}>
           <div style={kpiLabelStyle}>VALOR INVENTARIO</div>
@@ -480,7 +575,7 @@ function DashView({sim,setSim,inventory,sales,setSales,settings,setSettings}){
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
             <div>
               <div style={{fontSize:8,letterSpacing:"0.24em",color:C.dim,fontWeight:600}}>TENDENCIA · VENTAS NETAS</div>
-              <div style={{fontSize:24,fontWeight:200,marginTop:4}}>{sol(sales.reduce((a,s)=>a+s.amount,0),0)}</div>
+              <div style={{fontSize:24,fontWeight:200,marginTop:4}}>{sol(sales.reduce((a,s)=>a+(s.paidAmount??(s.status==="paid"?(s.totalAmount??s.amount??0):0)),0),0)}</div>
             </div>
             <span style={{fontSize:10,color:C.dim}}>{sales.length} venta(s) registrada(s)</span>
           </div>
@@ -589,36 +684,83 @@ function DashView({sim,setSim,inventory,sales,setSales,settings,setSettings}){
           {sales.length===0 && (
             <div style={{fontSize:10,color:C.dim,padding:"10px 0"}}>No hay ventas registradas aún.</div>
           )}
-          {sales.map(s=>(
-            <div key={s.id} style={{display:"grid",gridTemplateColumns:"52px 1fr 80px 90px 48px",
-              gap:8,padding:"8px 0",borderBottom:`1px solid ${C.brd}`,alignItems:"center"}}>
-              <div style={{fontSize:9,color:C.dim}}>{s.date}</div>
-              <div>
-                <div style={{fontSize:10.5,color:C.text}}>{s.client}</div>
-                <div style={{fontSize:8.5,color:C.dim,marginTop:1}}>{s.product}</div>
+          {/* Abono inline panel */}
+          {abonoId && (()=>{
+            const s = sales.find(x=>x.id===abonoId);
+            if(!s) return null;
+            const total = s.totalAmount ?? s.amount ?? 0;
+            const paid  = s.paidAmount || 0;
+            const pending = Math.max(0, total-paid);
+            return(
+              <div style={{background:C.el,borderRadius:3,padding:"12px 14px",marginBottom:10,
+                border:`1px solid ${C.gold}44`}}>
+                <div style={{fontSize:8,letterSpacing:"0.2em",color:C.gold,fontWeight:600,marginBottom:8}}>
+                  REGISTRAR ABONO · {s.client}
+                </div>
+                <div style={{fontSize:9.5,color:C.dim,marginBottom:10}}>
+                  Total: {sol(total,2)} · Pagado: {sol(paid,2)} · Pendiente: <span style={{color:C.warn}}>{sol(pending,2)}</span>
+                </div>
+                <div style={{display:"flex",gap:8,alignItems:"flex-end"}}>
+                  <div style={{flex:1}}>
+                    <Field label="MONTO DEL ABONO" prefix="S/" value={abonoVal}
+                      onChange={e=>setAbonoVal(e.target.value)}/>
+                  </div>
+                  <button onClick={()=>{ setAbonoVal(String(pending.toFixed(2))); }}
+                    style={{...btnGhost,padding:"7px 10px",fontSize:9,whiteSpace:"nowrap"}}>
+                    Todo
+                  </button>
+                  <button onClick={submitAbono} style={btnGold}>✓ Abonar</button>
+                  <button onClick={()=>{setAbonoId(null);setAbonoVal("");}} style={btnGhost}>Cancelar</button>
+                </div>
               </div>
-              <div style={{fontSize:12.5,fontWeight:200}}>{sol(s.amount,0)}</div>
-              <Badge status={s.status}/>
-              <div style={{display:"flex",gap:6,justifyContent:"flex-end"}}>
-                {s.kind!=="decant" && (
-                  <button onClick={()=>setFormMode({type:"edit", sale:s})}
-                    title="Editar venta"
+            );
+          })()}
+          {sales.map(s=>{
+            const total = s.totalAmount ?? s.amount ?? 0;
+            const paid  = s.paidAmount ?? (s.status==="paid" ? total : 0);
+            const pending = Math.max(0, total-paid);
+            const isFullyPaid = paid >= total && total > 0;
+            return(
+            <div key={s.id} style={{padding:"8px 0",borderBottom:`1px solid ${C.brd}`}}>
+              <div style={{display:"grid",gridTemplateColumns:"52px 1fr 90px 90px 60px",
+                gap:8,alignItems:"center"}}>
+                <div style={{fontSize:9,color:C.dim}}>{s.date}</div>
+                <div>
+                  <div style={{fontSize:10.5,color:C.text}}>{s.client}</div>
+                  <div style={{fontSize:8.5,color:C.dim,marginTop:1}}>{s.product}</div>
+                </div>
+                <div>
+                  <div style={{fontSize:12.5,fontWeight:200}}>{sol(total,0)}</div>
+                  {paid>0 && paid<total && <div style={{fontSize:8,color:C.warn,marginTop:1}}>+{sol(paid,0)} cobrado</div>}
+                </div>
+                <Badge totalAmount={total} paidAmount={paid}/>
+                <div style={{display:"flex",gap:4,justifyContent:"flex-end"}}>
+                  {!isFullyPaid && s.kind!=="decant" && (
+                    <button onClick={()=>{setAbonoId(s.id);setAbonoVal("");setFormMode(null);}}
+                      title="Registrar abono"
+                      style={{background:C.goldBg,border:`1px solid ${C.gold}55`,borderRadius:3,
+                        color:C.gold,fontSize:9,padding:"3px 6px",cursor:"pointer",fontFamily:"inherit",
+                        letterSpacing:"0.04em",fontWeight:600}}>$+</button>
+                  )}
+                  {s.kind!=="decant" && (
+                    <button onClick={()=>{setAbonoId(null);setFormMode({type:"edit", sale:s});}}
+                      title="Editar venta"
+                      style={{background:"transparent",border:"none",color:C.dim,cursor:"pointer",
+                        fontSize:12,padding:0,lineHeight:1,fontFamily:"inherit",transition:"color 0.15s"}}
+                      onMouseEnter={e=>e.target.style.color=C.gold}
+                      onMouseLeave={e=>e.target.style.color=C.dim}>✎</button>
+                  )}
+                  <button onClick={()=>setSales(prev=>prev.filter(x=>x.id!==s.id))}
+                    title="Eliminar venta"
                     style={{background:"transparent",border:"none",color:C.dim,cursor:"pointer",
-                      fontSize:12,padding:0,lineHeight:1,fontFamily:"inherit",
-                      transition:"color 0.15s"}}
-                    onMouseEnter={e=>e.target.style.color=C.gold}
-                    onMouseLeave={e=>e.target.style.color=C.dim}>✎</button>
-                )}
-                <button onClick={()=>setSales(prev=>prev.filter(x=>x.id!==s.id))}
-                  title="Eliminar venta"
-                  style={{background:"transparent",border:"none",color:C.dim,cursor:"pointer",
-                    fontSize:14,padding:0,lineHeight:1,fontFamily:"inherit",
-                    transition:"color 0.15s"}}
-                  onMouseEnter={e=>e.target.style.color=C.err}
-                  onMouseLeave={e=>e.target.style.color=C.dim}>×</button>
+                      fontSize:14,padding:0,lineHeight:1,fontFamily:"inherit",transition:"color 0.15s"}}
+                    onMouseEnter={e=>e.target.style.color=C.err}
+                    onMouseLeave={e=>e.target.style.color=C.dim}>×</button>
+                </div>
               </div>
+              <PayBar totalAmount={total} paidAmount={paid}/>
             </div>
-          ))}
+          );})}
         </div>
       </div>
     </div>
@@ -798,21 +940,43 @@ function ImportView({imp,setImp,settings}){
   );
 
   // ── Existing batch item row (editable inline) ──
+  // Uses local draft state so every keystroke does NOT call updItem → setImp → setStore.
+  // Values are committed to the store only onBlur (when the user leaves the field).
   const ItemRow = ({it, bR}) => {
     const ri = bR.items.find(x=>x.id===it.id) || it;
+    const [d, setD] = useState({name:it.name, priceUSD:it.priceUSD, units:it.units, discount:it.discount});
+
+    // Sync draft if parent store changes while no input is focused (e.g. remote refresh)
+    useEffect(()=>{
+      const tag = document.activeElement && document.activeElement.tagName;
+      if(tag==="INPUT") return;
+      setD({name:it.name, priceUSD:it.priceUSD, units:it.units, discount:it.discount});
+    // eslint-disable-next-line
+    },[it.name, it.priceUSD, it.units, it.discount]);
+
+    const commit = (f, raw) => {
+      const v = f==="name" ? raw : (parseFloat(raw)||0);
+      setD(prev=>({...prev,[f]:v}));
+      updItem(it.id, f, raw);
+    };
+
     return(
       <div style={{background:C.bg,borderRadius:3,border:`1px solid ${C.brd}`,
         padding:"12px 14px",marginBottom:6}}>
         <div style={{display:"grid",gridTemplateColumns:"1fr 90px 70px 70px 24px",
           gap:8,alignItems:"flex-end",marginBottom: ri.unitCost>0 ? 10 : 0}}>
-          <Field label="PERFUME / MODELO" type="text" value={it.name}
-            onChange={e=>updItem(it.id,"name",e.target.value)}/>
-          <Field label="USD UNIT" prefix="$" value={it.priceUSD}
-            onChange={e=>updItem(it.id,"priceUSD",e.target.value)}/>
-          <Field label="UNIDADES" step="1" value={it.units}
-            onChange={e=>updItem(it.id,"units",e.target.value)}/>
-          <Field label="DESC%" prefix="%" value={it.discount}
-            onChange={e=>updItem(it.id,"discount",e.target.value)}/>
+          <Field label="PERFUME / MODELO" type="text" value={d.name}
+            onChange={e=>setD(p=>({...p,name:e.target.value}))}
+            onBlur={e=>commit("name", e.target.value)}/>
+          <Field label="USD UNIT" prefix="$" value={d.priceUSD}
+            onChange={e=>setD(p=>({...p,priceUSD:e.target.value}))}
+            onBlur={e=>commit("priceUSD", e.target.value)}/>
+          <Field label="UNIDADES" step="1" value={d.units}
+            onChange={e=>setD(p=>({...p,units:e.target.value}))}
+            onBlur={e=>commit("units", e.target.value)}/>
+          <Field label="DESC%" prefix="%" value={d.discount}
+            onChange={e=>setD(p=>({...p,discount:e.target.value}))}
+            onBlur={e=>commit("discount", e.target.value)}/>
           <button onClick={()=>removeItem(it.id)}
             disabled={(selected.items||[]).length<=1}
             title="Eliminar este perfume"
@@ -1388,7 +1552,11 @@ function InventoryView({inventory,setInventory,settings,sellDecant}){
 function emptyExpenseRow(){ return {id:Date.now()+Math.random(), label:"", amount:""}; }
 
 function PaymentsView({sales,setSales,settlements,setSettlements,settings}){
-  const eligible = useMemo(()=> sales.filter(s=>s.kind==="sellada" && s.status==="paid" && !s.settlementId), [sales]);
+  const eligible = useMemo(()=> sales.filter(s=>{
+    const total = s.totalAmount ?? s.amount ?? 0;
+    const paid  = s.paidAmount ?? (s.status==="paid" ? total : 0);
+    return s.kind==="sellada" && paid >= total && total > 0 && !s.settlementId;
+  }), [sales]);
   const allSelladas = useMemo(()=> sales.filter(s=>s.kind==="sellada"), [sales]);
   const [included,setIncluded] = useState({});
   const [expenses,setExpenses] = useState([emptyExpenseRow()]);
@@ -2274,7 +2442,8 @@ export default function App(){
     const costPortion = +(costPerMl*ml).toFixed(2);
     const newSale = {
       id: Date.now(), client: client && client.trim() ? client.trim() : "Venta de decant",
-      product: `${item.name} ${ml}ml (Decant)`, amount: price, status:"paid",
+      product: `${item.name} ${ml}ml (Decant)`,
+      amount: price, totalAmount: price, paidAmount: price, status:"paid",
       date: todayLabel(), kind:"decant", itemId, ml, cost: costPortion,
       splitE: item.splitE, paidToSocio:false, paidDate:null, settlementId:null,
     };
@@ -2309,7 +2478,8 @@ export default function App(){
           syncing={syncing} syncError={syncError} lastSync={lastSync} onRefresh={manualRefresh}/>
         <main style={{flex:1,overflow:"hidden"}}>
           {view==="dash" && <DashView sim={sim} setSim={setSim} inventory={store.inventory}
-            sales={store.sales} setSales={setSales} settings={store.settings} setSettings={setSettings}/>}
+            sales={store.sales} setSales={setSales} settings={store.settings} setSettings={setSettings}
+            setInventory={setInventory}/>}
           {view==="import" && <ImportView imp={store.imp} setImp={setImp} settings={store.settings}/>}
           {view==="inventory" && <InventoryView inventory={store.inventory} setInventory={setInventory}
             settings={store.settings} sellDecant={sellDecant}/>}
