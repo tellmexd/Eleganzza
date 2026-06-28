@@ -199,8 +199,10 @@ function ChartTip({active,payload,label}){
   );
 }
 
-function Field({label,prefix,value,onChange,type="number",step="0.01",readOnly}){
+function Field({label,prefix,value,onChange,onBlur:externalBlur,type="number",step="0.01",readOnly}){
   const isNum = type==="number";
+  // For text fields owned by a parent with local draft state, we just show `value` directly.
+  // For number fields we still keep an internal draft so partial input (e.g. "3.") isn't lost.
   const [draft,setDraft] = useState(isNum ? String(value ?? "") : value);
 
   useEffect(()=>{ if(isNum) setDraft(String(value ?? "")); }, [value, isNum]);
@@ -213,9 +215,9 @@ function Field({label,prefix,value,onChange,type="number",step="0.01",readOnly})
     if(raw===""||raw==="-"||raw==="."||raw==="-.") return;
     if(!isNaN(parseFloat(raw))) onChange(e);
   };
-  const handleBlur = () => {
-    if(!isNum) return;
-    if(draft===""||isNaN(parseFloat(draft))) setDraft(String(value ?? 0));
+  const handleBlur = (e) => {
+    if(isNum && (draft===""||isNaN(parseFloat(draft)))) setDraft(String(value ?? 0));
+    if(externalBlur) externalBlur(e);
   };
 
   return(
@@ -235,7 +237,7 @@ function Field({label,prefix,value,onChange,type="number",step="0.01",readOnly})
   );
 }
 
-function NumberInput({value,onChange,style,min,max}){
+function NumberInput({value,onChange,onBlur:externalBlur,style,min,max}){
   const [draft,setDraft] = useState(String(value ?? ""));
   useEffect(()=>{ setDraft(String(value ?? "")); }, [value]);
 
@@ -246,8 +248,9 @@ function NumberInput({value,onChange,style,min,max}){
     const n = parseFloat(raw);
     if(!isNaN(n)) onChange(n);
   };
-  const handleBlur = () => {
+  const handleBlur = (e) => {
     if(draft===""||isNaN(parseFloat(draft))) setDraft(String(value ?? 0));
+    if(externalBlur) externalBlur(e);
   };
 
   return <input type="number" min={min} max={max} value={draft} onChange={handleChange} onBlur={handleBlur}
@@ -271,11 +274,11 @@ function Select({label,value,onChange,options}){
   );
 }
 
-function TextArea({label,value,onChange,rows=3}){
+function TextArea({label,value,onChange,onBlur,rows=3}){
   return(
     <div>
       <div style={{fontSize:8,letterSpacing:"0.18em",color:C.dim,marginBottom:4,fontWeight:600}}>{label}</div>
-      <textarea value={value} onChange={onChange} rows={rows}
+      <textarea value={value} onChange={onChange} onBlur={onBlur} rows={rows}
         style={{width:"100%",padding:"9px 10px",background:C.el,border:`1px solid ${C.brd}`,
           borderRadius:3,color:C.text,fontSize:12,outline:"none",fontFamily:"inherit",resize:"vertical"}}/>
     </div>
@@ -1917,10 +1920,30 @@ function QuotesView({inventory,quotes,setQuotes,settings}){
 
 // ── PROFITS VIEW ────────────────────────────────────────────────────────────
 function ProfView({settings,setSettings}){
-  const net = settings.monthlyMargin;
+  // Local draft for the editable KPI fields so typing doesn't trigger sync on every keystroke
+  const [draft,setDraft] = useState({
+    monthlyMargin: settings.monthlyMargin,
+    nextSettlementDate: settings.nextSettlementDate,
+    yearAccumulated: settings.yearAccumulated,
+  });
+
+  // If remote sync updates settings while no input is focused, update draft
+  useEffect(()=>{
+    const tag = document.activeElement && document.activeElement.tagName;
+    if(tag==="INPUT"||tag==="TEXTAREA") return;
+    setDraft(prev=>({
+      ...prev,
+      monthlyMargin: settings.monthlyMargin,
+      nextSettlementDate: settings.nextSettlementDate,
+      yearAccumulated: settings.yearAccumulated,
+    }));
+  },[settings]);
+
+  const net = draft.monthlyMargin;
   const splitE = settings.splitDefault;
   const shareE = net*splitE/100, shareM = net*(100-splitE)/100;
-  const up = (f,v) => setSettings(p=>({...p,[f]:v}));
+  const commitNum = (f,n) => setSettings(p=>({...p,[f]:n}));
+  const commitStr = (f) => setSettings(p=>({...p,[f]:draft[f]}));
 
   return(
     <div style={{height:"100vh",overflowY:"auto",padding:28}}>
@@ -1994,18 +2017,24 @@ function ProfView({settings,setSettings}){
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
         <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"14px 16px"}}>
           <div style={kpiLabelStyle}>MARGEN NETO TOTAL</div>
-          <NumberInput value={settings.monthlyMargin} onChange={n=>up("monthlyMargin",n)}
+          <NumberInput value={draft.monthlyMargin}
+            onChange={n=>setDraft(p=>({...p,monthlyMargin:n}))}
+            onBlur={()=>commitNum("monthlyMargin",draft.monthlyMargin)}
             style={{fontSize:15,fontWeight:200,background:"transparent",border:"none",color:C.text,width:"100%",outline:"none",fontFamily:"inherit"}}/>
           <div style={{fontSize:9,color:C.dim,marginTop:4}}>editable manualmente</div>
         </div>
         <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"14px 16px"}}>
           <div style={kpiLabelStyle}>PRÓXIMA LIQUIDACIÓN</div>
-          <input type="text" value={settings.nextSettlementDate} onChange={e=>up("nextSettlementDate",e.target.value)}
+          <input type="text" value={draft.nextSettlementDate}
+            onChange={e=>setDraft(p=>({...p,nextSettlementDate:e.target.value}))}
+            onBlur={()=>commitStr("nextSettlementDate")}
             style={{fontSize:15,fontWeight:200,background:"transparent",border:"none",color:C.text,width:"100%",outline:"none",fontFamily:"inherit"}}/>
         </div>
         <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"14px 16px"}}>
           <div style={kpiLabelStyle}>ACUMULADO AÑO</div>
-          <NumberInput value={settings.yearAccumulated} onChange={n=>up("yearAccumulated",n)}
+          <NumberInput value={draft.yearAccumulated}
+            onChange={n=>setDraft(p=>({...p,yearAccumulated:n}))}
+            onBlur={()=>commitNum("yearAccumulated",draft.yearAccumulated)}
             style={{fontSize:15,fontWeight:200,background:"transparent",border:"none",color:C.text,width:"100%",outline:"none",fontFamily:"inherit"}}/>
         </div>
         <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"14px 16px"}}>
@@ -2019,8 +2048,48 @@ function ProfView({settings,setSettings}){
 }
 
 // ── SETTINGS VIEW ────────────────────────────────────────────────────────────
+// Uses local draft state so typing never triggers store updates (and thus no
+// Supabase sync) on every keystroke. Changes are committed to the store onBlur.
 function SettingsView({settings,setSettings}){
-  const up = (f,v) => setSettings(prev=>({...prev,[f]:v}));
+  const [draft,setDraft] = useState({...settings});
+
+  // Sync draft if remote data arrives while no input is focused
+  useEffect(()=>{
+    const tag = document.activeElement && document.activeElement.tagName;
+    if(tag==="INPUT"||tag==="TEXTAREA") return;
+    setDraft({...settings});
+  },[settings]);
+
+  // Update only the local draft while the user types
+  const set = (f,v) => setDraft(prev=>({...prev,[f]:v}));
+
+  // Commit a single field to the global store onBlur
+  const commit = (f,v) => setSettings(prev=>({...prev,[f]: v !== undefined ? v : draft[f]}));
+
+  // Helpers for numeric commit
+  const commitNum = (f,raw,transform) => {
+    const n = transform ? transform(raw) : (parseFloat(raw)||0);
+    setDraft(prev=>({...prev,[f]:n}));
+    setSettings(prev=>({...prev,[f]:n}));
+  };
+
+  // Thin wrappers so JSX stays readable
+  const SF = ({label,prefix,f,type="number",step="0.01",transform}) => (
+    <Field label={label} prefix={prefix} type={type} step={step}
+      value={draft[f]??""} 
+      onChange={e=>set(f, e.target.value)}
+      onBlur={e=>{
+        if(type==="text") commit(f, draft[f]);
+        else commitNum(f, e.target.value, transform);
+      }}/>
+  );
+
+  const STA = ({label,f,rows=3}) => (
+    <TextArea label={label} rows={rows}
+      value={draft[f]??""} onChange={e=>set(f,e.target.value)}
+      onBlur={()=>commit(f)}/>
+  );
+
   return(
     <div style={{height:"100vh",overflowY:"auto",padding:28}}>
       <div style={{marginBottom:24}}>
@@ -2034,38 +2103,38 @@ function SettingsView({settings,setSettings}){
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:14}}>
         <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px",display:"flex",flexDirection:"column",gap:9}}>
           <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:4,fontWeight:600}}>FINANZAS</div>
-          <Field label="TIPO DE CAMBIO USD → PEN" prefix="S/" value={settings.tc} onChange={e=>up("tc",parseFloat(e.target.value)||0)}/>
-          <Field label={`SPLIT ${settings.partnerA.toUpperCase()} % (PREDETERMINADO)`} prefix="%" value={settings.splitDefault}
-            onChange={e=>up("splitDefault",Math.min(100,Math.max(0,parseFloat(e.target.value)||0)))}/>
-          <Field label="MARGEN MÍNIMO SOBRE COSTO" prefix="%" value={settings.minMarginPct}
-            onChange={e=>up("minMarginPct",parseFloat(e.target.value)||0)}/>
+          <SF label="TIPO DE CAMBIO USD → PEN" prefix="S/" f="tc"/>
+          <SF label={`SPLIT ${(draft.partnerA||"").toUpperCase()} % (PREDETERMINADO)`} prefix="%" f="splitDefault"
+            transform={v=>Math.min(100,Math.max(0,parseFloat(v)||0))}/>
+          <SF label="MARGEN MÍNIMO SOBRE COSTO" prefix="%" f="minMarginPct"/>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
-            <Field label="NOMBRE SOCIO A" type="text" value={settings.partnerA} onChange={e=>up("partnerA",e.target.value)}/>
-            <Field label="NOMBRE SOCIO B" type="text" value={settings.partnerB} onChange={e=>up("partnerB",e.target.value)}/>
+            <SF label="NOMBRE SOCIO A" type="text" f="partnerA"/>
+            <SF label="NOMBRE SOCIO B" type="text" f="partnerB"/>
           </div>
         </div>
         <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px",display:"flex",flexDirection:"column",gap:9}}>
           <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:4,fontWeight:600}}>MARCA & COTIZACIONES</div>
-          <Field label="NOMBRE DE LA MARCA" type="text" value={settings.businessName} onChange={e=>up("businessName",e.target.value)}/>
+          <SF label="NOMBRE DE LA MARCA" type="text" f="businessName"/>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
-            <Field label="TELÉFONO / WHATSAPP" type="text" value={settings.contactPhone} onChange={e=>up("contactPhone",e.target.value)}/>
-            <Field label="INSTAGRAM" type="text" value={settings.contactInstagram} onChange={e=>up("contactInstagram",e.target.value)}/>
+            <SF label="TELÉFONO / WHATSAPP" type="text" f="contactPhone"/>
+            <SF label="INSTAGRAM" type="text" f="contactInstagram"/>
           </div>
-          <Field label="VALIDEZ DE COTIZACIÓN (DÍAS)" step="1" value={settings.quoteValidityDays} onChange={e=>up("quoteValidityDays",parseInt(e.target.value)||1)}/>
+          <SF label="VALIDEZ DE COTIZACIÓN (DÍAS)" step="1" f="quoteValidityDays"
+            transform={v=>parseInt(v)||1}/>
         </div>
       </div>
 
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:14}}>
         <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px"}}>
-          <TextArea label="MÉTODOS DE PAGO" value={settings.paymentMethods} onChange={e=>up("paymentMethods",e.target.value)} rows={3}/>
+          <STA label="MÉTODOS DE PAGO" f="paymentMethods" rows={3}/>
         </div>
         <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px"}}>
-          <TextArea label="POLÍTICA DE ENTREGA" value={settings.deliveryInfo} onChange={e=>up("deliveryInfo",e.target.value)} rows={3}/>
+          <STA label="POLÍTICA DE ENTREGA" f="deliveryInfo" rows={3}/>
         </div>
       </div>
 
       <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px"}}>
-        <TextArea label="TÉRMINOS Y CONDICIONES (pie de cada cotización)" value={settings.quoteTerms} onChange={e=>up("quoteTerms",e.target.value)} rows={3}/>
+        <STA label="TÉRMINOS Y CONDICIONES (pie de cada cotización)" f="quoteTerms" rows={3}/>
       </div>
     </div>
   );
@@ -2149,7 +2218,7 @@ export default function App(){
       setSyncing(false);
       setSyncError(!ok);
       if(ok) setLastSync(new Date());
-    }, 700);
+    }, 1500);
     return ()=>clearTimeout(saveTimer.current);
   },[store]);
 
