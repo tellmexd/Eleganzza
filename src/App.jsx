@@ -299,13 +299,19 @@ function TextArea({label,value,onChange,onBlur,rows=3}){
   );
 }
 
-function Badge({totalAmount,paidAmount}){
+function Badge({totalAmount,paidAmount,kind}){
   const total = totalAmount||0;
   const paid  = paidAmount||0;
   let color, label;
-  if(paid >= total && total > 0){ color=C.ok;   label="PAGADO"; }
-  else if(paid > 0)             { color=C.warn;  label="PARCIAL"; }
-  else                          { color=C.warn;  label="PENDIENTE"; }
+  if(kind==="separado" && paid < total){
+    color=C.gold; label="SEPARADO";
+  } else if(paid >= total && total > 0){
+    color=C.ok;   label="PAGADO";
+  } else if(paid > 0){
+    color=C.warn;  label="PARCIAL";
+  } else {
+    color=C.warn;  label="PENDIENTE";
+  }
   return(
     <span style={{fontSize:8,letterSpacing:"0.1em",fontWeight:700,color,
       background:`${color}18`,padding:"3px 7px",borderRadius:2,whiteSpace:"nowrap"}}>
@@ -384,11 +390,12 @@ function QuickSaleForm({inventory,settings,initial,submitLabel,onSubmit,onCancel
     const totalAmount = parseFloat(f.amount)||0;
     const paidAmount  = Math.min(parseFloat(f.paidAmount)||0, totalAmount);
     const cost = parseFloat(f.cost)||0;
-    const product = item ? `${item.name} (${f.kind==="sellada"?"Sellado":"Otro"})` : (f.custom.trim() || "Producto personalizado");
+    const kindLabel = f.kind==="sellada" ? "Sellado" : f.kind==="separado" ? "Separado" : "Otro";
+    const product = item ? `${item.name} (${kindLabel})` : (f.custom.trim() || "Producto personalizado");
     onSubmit({
       client:f.client.trim(), product,
       totalAmount, paidAmount,
-      amount: totalAmount, // keep for backward compat with PaymentsView
+      amount: totalAmount,
       kind:f.kind,
       itemId: item?item.id:null, cost,
       splitE: item?item.splitE:settings.splitDefault,
@@ -403,7 +410,7 @@ function QuickSaleForm({inventory,settings,initial,submitLabel,onSubmit,onCancel
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
         <Field label="CLIENTE" type="text" value={f.client} onChange={e=>setF({...f,client:e.target.value})}/>
         <Select label="TIPO DE VENTA" value={f.kind} onChange={e=>setF({...f,kind:e.target.value})}
-          options={[{value:"sellada",label:"Botella sellada"},{value:"otro",label:"Otro / promoción"}]}/>
+          options={[{value:"sellada",label:"Botella sellada"},{value:"separado",label:"Separado / Reserva"},{value:"otro",label:"Otro / promoción"}]}/>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
         <Select label="PERFUME (OPCIONAL)" value={f.itemId}
@@ -433,7 +440,7 @@ function QuickSaleForm({inventory,settings,initial,submitLabel,onSubmit,onCancel
           )}
         </div>
       </div>
-      {item && (
+      {item && (f.kind==="sellada"||f.kind==="separado") && (
         <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",borderRadius:3,
           background: item.stock===0 ? `${C.err}15` : item.stock===1 ? `${C.warn}15` : `${C.ok}15`,
           border:`1px solid ${item.stock===0?C.err:item.stock===1?C.warn:C.ok}44`}}>
@@ -443,7 +450,9 @@ function QuickSaleForm({inventory,settings,initial,submitLabel,onSubmit,onCancel
           <span style={{fontSize:9,color:C.dim}}>
             {item.stock===0
               ? "No quedan unidades disponibles de este perfume."
-              : `Quedan ${item.stock} unidad${item.stock!==1?"es":""} — esta venta descontará 1.`}
+              : f.kind==="separado"
+                ? `Quedan ${item.stock} unidad${item.stock!==1?"es":""} — se separará 1 unidad del stock.`
+                : `Quedan ${item.stock} unidad${item.stock!==1?"es":""} — esta venta descontará 1.`}
           </span>
         </div>
       )}
@@ -518,17 +527,26 @@ function DashView({sim,setSim,inventory,sales,setSales,settings,setSettings,setI
     } else {
       const total = payload.totalAmount || payload.amount || 0;
       const paid  = payload.paidAmount || 0;
-      setSales(prev=>[{
-        id:Date.now(), ml:null,
-        paidToSocio:false, paidDate:null, settlementId:null,
-        status: paid >= total ? "paid" : "pending",
-        date: payload.date || todayLabel(),
-        dateISO: payload.dateISO || new Date().toISOString().slice(0,10),
-        ...payload,
-      }, ...prev]);
+      setSales(prev=>{
+        const newSale = {
+          id:Date.now(), ml:null,
+          paidToSocio:false, paidDate:null, settlementId:null,
+          status: paid >= total ? "paid" : "pending",
+          date: payload.date || todayLabel(),
+          dateISO: payload.dateISO || new Date().toISOString().slice(0,10),
+          ...payload,
+        };
+        // Keep list sorted: most recent dateISO first, ties broken by id (insertion order)
+        return [...prev, newSale].sort((a,b)=>{
+          const da = a.dateISO||"";
+          const db = b.dateISO||"";
+          if(db !== da) return db.localeCompare(da);
+          return (b.id||0) - (a.id||0);
+        });
+      });
 
-      // ── FIX 3: Descontar 1 unidad del inventario cuando se registra una venta de botella sellada ──
-      if(payload.kind === "sellada" && payload.itemId){
+      // Descontar 1 unidad del inventario para ventas selladas o separadas
+      if((payload.kind === "sellada" || payload.kind === "separado") && payload.itemId){
         setInventory(prev=>prev.map(i=> i.id===payload.itemId && i.stock>0
           ? {...i, stock: i.stock-1}
           : i
@@ -715,7 +733,11 @@ function DashView({sim,setSim,inventory,sales,setSales,settings,setSettings,setI
               </div>
             );
           })()}
-          {sales.map(s=>{
+          {[...sales].sort((a,b)=>{
+              const da = a.dateISO||""; const db = b.dateISO||"";
+              if(db!==da) return db.localeCompare(da);
+              return (b.id||0)-(a.id||0);
+            }).map(s=>{
             const total = s.totalAmount ?? s.amount ?? 0;
             const paid  = s.paidAmount ?? (s.status==="paid" ? total : 0);
             const pending = Math.max(0, total-paid);
@@ -733,7 +755,7 @@ function DashView({sim,setSim,inventory,sales,setSales,settings,setSettings,setI
                   <div style={{fontSize:12.5,fontWeight:200}}>{sol(total,0)}</div>
                   {paid>0 && paid<total && <div style={{fontSize:8,color:C.warn,marginTop:1}}>+{sol(paid,0)} cobrado</div>}
                 </div>
-                <Badge totalAmount={total} paidAmount={paid}/>
+                <Badge totalAmount={total} paidAmount={paid} kind={s.kind}/>
                 <div style={{display:"flex",gap:4,justifyContent:"flex-end"}}>
                   {!isFullyPaid && s.kind!=="decant" && (
                     <button onClick={()=>{setAbonoId(s.id);setAbonoVal("");setFormMode(null);}}
@@ -750,7 +772,15 @@ function DashView({sim,setSim,inventory,sales,setSales,settings,setSettings,setI
                       onMouseEnter={e=>e.target.style.color=C.gold}
                       onMouseLeave={e=>e.target.style.color=C.dim}>✎</button>
                   )}
-                  <button onClick={()=>setSales(prev=>prev.filter(x=>x.id!==s.id))}
+                  <button onClick={()=>{
+                    // Restore stock if this was a "sellada" or "separado" sale linked to inventory
+                    if((s.kind==="sellada"||s.kind==="separado") && s.itemId){
+                      setInventory(prev=>prev.map(i=>
+                        i.id===s.itemId ? {...i, stock: (i.stock||0)+1} : i
+                      ));
+                    }
+                    setSales(prev=>prev.filter(x=>x.id!==s.id));
+                  }}
                     title="Eliminar venta"
                     style={{background:"transparent",border:"none",color:C.dim,cursor:"pointer",
                       fontSize:14,padding:0,lineHeight:1,fontFamily:"inherit",transition:"color 0.15s"}}
@@ -1555,7 +1585,8 @@ function PaymentsView({sales,setSales,settlements,setSettlements,settings}){
   const eligible = useMemo(()=> sales.filter(s=>{
     const total = s.totalAmount ?? s.amount ?? 0;
     const paid  = s.paidAmount ?? (s.status==="paid" ? total : 0);
-    return s.kind==="sellada" && paid >= total && total > 0 && !s.settlementId;
+    // sellada or separado (once fully paid) are eligible for partner settlement
+    return (s.kind==="sellada"||s.kind==="separado") && paid >= total && total > 0 && !s.settlementId;
   }), [sales]);
   const allSelladas = useMemo(()=> sales.filter(s=>s.kind==="sellada"), [sales]);
   const [included,setIncluded] = useState({});
