@@ -183,6 +183,7 @@ function Field({label,prefix,value,onChange,type="number",step="0.01",readOnly})
             color:C.dim,borderRight:`1px solid ${C.brd}`,whiteSpace:"nowrap"}}>{prefix}</div>
         )}
         <input type={type} step={step} value={isNum?draft:value} onChange={handleChange} onBlur={handleBlur} readOnly={readOnly}
+          onFocus={e=>{ if(parseFloat(e.target.value)===0) e.target.select(); }}
           style={{flex:1,minWidth:0,padding:"8px 10px",background:"transparent",border:"none",
             color:readOnly?C.dim:C.text,fontSize:12.5,outline:"none",fontFamily:"inherit"}}/>
       </div>
@@ -205,7 +206,9 @@ function NumberInput({value,onChange,style,min,max}){
     if(draft===""||isNaN(parseFloat(draft))) setDraft(String(value ?? 0));
   };
 
-  return <input type="number" min={min} max={max} value={draft} onChange={handleChange} onBlur={handleBlur} style={style}/>;
+  return <input type="number" min={min} max={max} value={draft} onChange={handleChange} onBlur={handleBlur}
+    onFocus={e=>{ if(parseFloat(e.target.value)===0) e.target.select(); }}
+    style={style}/>;
 }
 
 function Select({label,value,onChange,options}){
@@ -816,10 +819,10 @@ function InventoryView({inventory,setInventory,settings,sellDecant}){
   const removeItem = id => setInventory(prev=>prev.filter(i=>i.id!==id));
   const convert = id => setInventory(prev=>prev.map(i=>
     i.id===id && i.stock>0 ? {...i,stock:i.stock-1,decantMl:i.decantMl+i.ml} : i));
-  const addItem = () => setInventory(prev=>[...prev,{
+  const addItem = () => setInventory(prev=>[{
     id:Date.now(), name:"Nuevo perfume", ml:50, stock:0, cost:0,
     splitE:settings.splitDefault, decantMl:0, decantSold:0, ownership:"negocio", ownerName:"",
-  }]);
+  },...prev]);
 
   const toggleSell = id => { setOpenId(prev=>prev===id?null:id); setSellForm({ml:"",price:"",client:""}); };
   const submitSell = (item) => {
