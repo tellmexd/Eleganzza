@@ -33,9 +33,9 @@ const addDaysLabel = (days, d=new Date()) => {
 };
 
 // ── SHARED STYLE HELPERS ────────────────────────────────────────────────────
-const btnGhost = {padding:"8px 15px",background:"transparent",border:`1px solid ${C.brd}`,
+const btnGhost = {padding:"7px 14px",background:"transparent",border:`1px solid ${C.brd}`,
   borderRadius:3,color:C.dim,fontSize:10,letterSpacing:"0.05em",cursor:"pointer",fontFamily:"inherit"};
-const btnGold = {padding:"8px 15px",background:C.goldBg,border:`1px solid ${C.gold}55`,
+const btnGold = {padding:"7px 14px",background:C.goldBg,border:`1px solid ${C.gold}55`,
   borderRadius:3,color:C.gold,fontSize:10,letterSpacing:"0.05em",fontWeight:600,cursor:"pointer",fontFamily:"inherit"};
 const kpiLabelStyle = {fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:10,fontWeight:600};
 const kpiInputStyle = {fontSize:24,fontWeight:200,letterSpacing:"-0.02em",background:"transparent",
@@ -407,12 +407,12 @@ function QuickSaleForm({inventory,settings,initial,submitLabel,onSubmit,onCancel
   return(
     <div style={{background:C.el,borderRadius:3,padding:"12px 14px",marginBottom:10,
       display:"flex",flexDirection:"column",gap:8}}>
-      <div className="g2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
         <Field label="CLIENTE" type="text" value={f.client} onChange={e=>setF({...f,client:e.target.value})}/>
         <Select label="TIPO DE VENTA" value={f.kind} onChange={e=>setF({...f,kind:e.target.value})}
           options={[{value:"sellada",label:"Botella sellada"},{value:"separado",label:"Separado / Reserva"},{value:"otro",label:"Otro / promoción"}]}/>
       </div>
-      <div className="g2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
         <Select label="PERFUME (OPCIONAL)" value={f.itemId}
           onChange={e=>pickItem(e.target.value)}
           options={[{value:"",label:"— Producto personalizado —"},...inventory.map(i=>({value:String(i.id),label:i.name}))]}/>
@@ -422,7 +422,7 @@ function QuickSaleForm({inventory,settings,initial,submitLabel,onSubmit,onCancel
       {!f.itemId && (
         <Field label="DESCRIPCIÓN DEL PRODUCTO" type="text" value={f.custom} onChange={e=>setF({...f,custom:e.target.value})}/>
       )}
-      <div className="g3" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
         <Field label="MONTO TOTAL (VENTA)" prefix="S/" value={f.amount} onChange={e=>setF({...f,amount:e.target.value})}/>
         <Field label="COSTO" prefix="S/" value={f.cost} onChange={e=>setF({...f,cost:e.target.value})}/>
         <div>
@@ -557,14 +557,14 @@ function DashView({sim,setSim,inventory,sales,setSales,settings,setSettings,setI
   };
 
   return(
-    <div className="view-scroll" style={{height:"100%",overflowY:"auto",padding:28}}>
+    <div style={{height:"100vh",overflowY:"auto",padding:28}}>
       <div style={{marginBottom:22}}>
         <div style={{fontSize:9,letterSpacing:"0.35em",color:C.gold,fontWeight:600}}>PANEL EN VIVO</div>
         <div style={{fontSize:22,fontWeight:300,marginTop:4}}>Panel de Control</div>
       </div>
 
       {/* KPIs */}
-      <div className="gKpi4" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
         <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"16px 18px"}}>
           <div style={kpiLabelStyle}>INGRESOS NETOS</div>
           <div style={{fontSize:24,fontWeight:200}}>{sol(ingresosNetos,0)}</div>
@@ -588,7 +588,7 @@ function DashView({sim,setSim,inventory,sales,setSales,settings,setSettings,setI
       </div>
 
       {/* Chart + Simulator */}
-      <div className="g2" style={{display:"grid",gridTemplateColumns:"1.7fr 1fr",gap:12,marginBottom:12}}>
+      <div style={{display:"grid",gridTemplateColumns:"1.7fr 1fr",gap:12,marginBottom:12}}>
         <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
             <div>
@@ -642,7 +642,7 @@ function DashView({sim,setSim,inventory,sales,setSales,settings,setSettings,setI
             </div>
           </div>
           <div style={{background:C.el,borderRadius:3,padding:"13px 14px"}}>
-            <div className="g2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
               <div>
                 <div style={{fontSize:8,letterSpacing:"0.14em",color:C.dim}}>MARGEN BRUTO</div>
                 <div style={{fontSize:22,fontWeight:200,color:mg.gross>=0?C.ok:C.err,marginTop:3}}>
@@ -666,7 +666,7 @@ function DashView({sim,setSim,inventory,sales,setSales,settings,setSettings,setI
       </div>
 
       {/* Critical stock + Recent sales */}
-      <div className="g2" style={{display:"grid",gridTemplateColumns:"220px 1fr",gap:12}}>
+      <div style={{display:"grid",gridTemplateColumns:"220px 1fr",gap:12}}>
         <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"16px 18px"}}>
           <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:12,fontWeight:600}}>
             STOCK CRÍTICO
@@ -744,7 +744,7 @@ function DashView({sim,setSim,inventory,sales,setSales,settings,setSettings,setI
             const isFullyPaid = paid >= total && total > 0;
             return(
             <div key={s.id} style={{padding:"8px 0",borderBottom:`1px solid ${C.brd}`}}>
-              <div className="gRowStack" style={{display:"grid",gridTemplateColumns:"52px 1fr 90px 90px 60px",
+              <div style={{display:"grid",gridTemplateColumns:"52px 1fr 90px 90px 60px",
                 gap:8,alignItems:"center"}}>
                 <div style={{fontSize:9,color:C.dim}}>{s.date}</div>
                 <div>
@@ -854,7 +854,7 @@ function DraftItemRow({it, idx, draft, setDraft}){
     ...p, items: p.items.map(x=> x.id!==it.id ? x : {...x,[f]: f==="name"?v:(parseFloat(v)||0)})
   }));
   return(
-    <div className="gRowStack" style={{display:"grid",gridTemplateColumns:"1fr 80px 60px 70px 24px",
+    <div style={{display:"grid",gridTemplateColumns:"1fr 80px 60px 70px 24px",
       gap:8,alignItems:"flex-end",
       padding:"10px 12px",background:C.bg,borderRadius:3,
       border:`1px solid ${C.brd}`,marginBottom:6}}>
@@ -882,7 +882,7 @@ function LogisticsInputs({vals, onUpd}){
       <div style={{fontSize:8,letterSpacing:"0.18em",color:"#7C9EFF",marginBottom:7,fontWeight:600,marginTop:2}}>
         GASTOS EN USD
       </div>
-      <div className="g2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:12}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:12}}>
         <Field label="ENVÍO MAYORISTA A MIAMI (USD total lote)" prefix="$" value={vals.shipUSA}
           onChange={e=>onUpd("shipUSA",e.target.value)}/>
         <Field label="TARIFA COURIER MIAMI→LIMA (USD/Kg)" prefix="$" value={vals.courierRate}
@@ -891,7 +891,7 @@ function LogisticsInputs({vals, onUpd}){
       <div style={{fontSize:8,letterSpacing:"0.18em",color:C.gold,marginBottom:7,fontWeight:600}}>
         GASTOS EN SOLES
       </div>
-      <div className="g2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
         <Field label="SHALOM LIMA→PIURA (S/ total lote)" prefix="S/" value={vals.localShalom}
           onChange={e=>onUpd("localShalom",e.target.value)}/>
         <Field label="PASAJES / OTROS GASTOS LOCALES (S/)" prefix="S/" value={vals.travel}
@@ -1023,7 +1023,7 @@ function ImportView({imp,setImp,settings}){
     return(
       <div style={{background:C.bg,borderRadius:3,border:`1px solid ${C.brd}`,
         padding:"12px 14px",marginBottom:6}}>
-        <div className="gRowStack" style={{display:"grid",gridTemplateColumns:"1fr 90px 60px 70px 24px",
+        <div style={{display:"grid",gridTemplateColumns:"1fr 90px 60px 70px 24px",
           gap:8,alignItems:"flex-end",marginBottom:ri.unitCost>0?10:0}}>
           <Field label="PERFUME / MODELO" type="text" value={d.name}
             onChange={e=>setD(p=>({...p,name:e.target.value}))}
@@ -1071,7 +1071,7 @@ function ImportView({imp,setImp,settings}){
   };
 
   return(
-    <div className="view-scroll" style={{height:"100%",overflowY:"auto",padding:28}}>
+    <div style={{height:"100vh",overflowY:"auto",padding:28}}>
       {/* Header */}
       <div style={{marginBottom:24}}>
         <div style={{fontSize:9,letterSpacing:"0.35em",color:C.gold,fontWeight:600}}>MÓDULO 01</div>
@@ -1103,7 +1103,7 @@ function ImportView({imp,setImp,settings}){
             <div style={{display:"flex",flexDirection:"column",gap:9,marginBottom:12}}>
               <Field label="NOMBRE DEL LOTE (ej: Importación Julio 2025)" type="text" value={draft.label}
                 onChange={e=>setDraft(p=>({...p,label:e.target.value}))}/>
-              <div className="g2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
                 <Field label="TIPO DE CAMBIO (TC)" prefix="S/" value={draft.tc}
                   onChange={e=>setDraft(p=>({...p,tc:parseFloat(e.target.value)||0}))}/>
                 <Field label={`SPLIT ${settings.partnerA.toUpperCase()}%`} prefix="%" value={draft.splitE}
@@ -1187,7 +1187,7 @@ function ImportView({imp,setImp,settings}){
 
       {/* ── SELECTED BATCH EDITOR ── */}
       {selected && R && (
-        <div className="g2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
 
           {/* LEFT — inputs */}
           <div style={{display:"flex",flexDirection:"column",gap:14}}>
@@ -1210,7 +1210,7 @@ function ImportView({imp,setImp,settings}){
               <div style={{display:"flex",flexDirection:"column",gap:9}}>
                 <Field label="NOMBRE DEL LOTE" type="text" value={selected.label||""}
                   onChange={e=>updBatch("label",e.target.value)}/>
-                <div className="g2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
                   <Field label="TIPO DE CAMBIO (TC)" prefix="S/" value={selected.tc}
                     onChange={e=>updBatch("tc",e.target.value)}/>
                   <Field label={`SPLIT ${settings.partnerA.toUpperCase()}%`} prefix="%" value={selected.splitE}
@@ -1399,23 +1399,23 @@ function InvItemCard({item,settings,patchItem,removeItem,convert,isOpen,onToggle
   return(
     <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"16px 18px",marginBottom:10}}>
       <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap",marginBottom:10}}>
-        <div className="field-flex" style={{flex:"2 1 200px"}}>
+        <div style={{flex:"2 1 200px"}}>
           <Field label="FRAGANCIA" type="text" value={item.name} onChange={e=>patchItem(item.id,"name",e.target.value)}/>
         </div>
-        <div className="field-flex" style={{flex:"0 1 70px"}}>
+        <div style={{flex:"0 1 70px"}}>
           <Field label="ML" step="1" value={item.ml} onChange={e=>patchItem(item.id,"ml",parseFloat(e.target.value)||0)}/>
         </div>
-        <div className="field-flex" style={{flex:"0 1 70px"}}>
+        <div style={{flex:"0 1 70px"}}>
           <Field label="STOCK" step="1" value={item.stock} onChange={e=>patchItem(item.id,"stock",parseFloat(e.target.value)||0)}/>
         </div>
-        <div className="field-flex" style={{flex:"0 1 100px"}}>
+        <div style={{flex:"0 1 100px"}}>
           <Field label="COSTO" prefix="S/" value={item.cost} onChange={e=>patchItem(item.id,"cost",parseFloat(e.target.value)||0)}/>
         </div>
-        <div className="field-flex" style={{flex:"0 1 90px"}}>
+        <div style={{flex:"0 1 90px"}}>
           <Field label="SPLIT E%" prefix="%" value={item.splitE}
             onChange={e=>patchItem(item.id,"splitE",Math.min(100,Math.max(0,parseFloat(e.target.value)||0)))}/>
         </div>
-        <div className="field-flex" style={{flex:"0 1 160px"}}>
+        <div style={{flex:"0 1 160px"}}>
           <Select label="PROPIEDAD" value={item.ownership}
             onChange={e=>{
               const val = e.target.value;
@@ -1425,7 +1425,7 @@ function InvItemCard({item,settings,patchItem,removeItem,convert,isOpen,onToggle
             options={[{value:"negocio",label:"Capital del negocio"},{value:"socio",label:"Aporte previo de un socio"}]}/>
         </div>
         {item.ownership==="socio" && (
-          <div className="field-flex" style={{flex:"0 1 130px"}}>
+          <div style={{flex:"0 1 130px"}}>
             <Select label="DUEÑO ORIGINAL" value={item.ownerName||settings.partnerA}
               onChange={e=>patchItem(item.id,"ownerName",e.target.value)}
               options={[settings.partnerA,settings.partnerB]}/>
@@ -1482,7 +1482,7 @@ function InvItemCard({item,settings,patchItem,removeItem,convert,isOpen,onToggle
 
       {isOpen && (
         <div style={{marginTop:14,background:C.el,borderRadius:3,padding:"14px 16px"}}>
-          <div className="gRowStack" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:9,marginBottom:10}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:9,marginBottom:10}}>
             <Field label="ML A VENDER" value={sellForm.ml} onChange={e=>setSellForm({...sellForm,ml:e.target.value})}/>
             <Field label="PRECIO DE VENTA" prefix="S/" value={sellForm.price} onChange={e=>setSellForm({...sellForm,price:e.target.value})}/>
             <Field label="CLIENTE (OPCIONAL)" type="text" value={sellForm.client} onChange={e=>setSellForm({...sellForm,client:e.target.value})}/>
@@ -1533,7 +1533,7 @@ function InventoryView({inventory,setInventory,settings,sellDecant}){
   const totalMl  = inventory.reduce((a,i)=>a+i.decantMl,0);
 
   return(
-    <div className="view-scroll" style={{height:"100%",overflowY:"auto",padding:28}}>
+    <div style={{height:"100vh",overflowY:"auto",padding:28}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:24,gap:12,flexWrap:"wrap"}}>
         <div>
           <div style={{fontSize:9,letterSpacing:"0.35em",color:C.gold,fontWeight:600}}>MÓDULO 03</div>
@@ -1546,7 +1546,7 @@ function InventoryView({inventory,setInventory,settings,sellDecant}){
         <button onClick={addItem} style={btnGold}>+ Agregar perfume</button>
       </div>
 
-      <div className="g3" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:16}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:16}}>
         {[
           {l:"VALOR EN STOCK",v:sol(totalVal,0),s:`${inventory.reduce((a,i)=>a+i.stock,0)} botellas selladas`},
           {l:"ML EN DECANTS",v:`${num(totalMl)} ml`,s:"Pool total fraccionado"},
@@ -1571,7 +1571,7 @@ function InventoryView({inventory,setInventory,settings,sellDecant}){
         <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:12,fontWeight:600}}>
           FORMATOS ESTÁNDAR DE DECANT
         </div>
-        <div className="gKpi4" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
           {[
             {f:"5ml",r:"×20/botella 100ml",p:"S/ 35–55",u:"MUESTRA PREMIUM"},
             {f:"10ml",r:"×10/botella 100ml",p:"S/ 70–110",u:"USO PERSONAL"},
@@ -1667,7 +1667,7 @@ function PaymentsView({sales,setSales,settlements,setSettlements,settings}){
   };
 
   return(
-    <div className="view-scroll" style={{height:"100%",overflowY:"auto",padding:28}}>
+    <div style={{height:"100vh",overflowY:"auto",padding:28}}>
       <div style={{marginBottom:22}}>
         <div style={{fontSize:9,letterSpacing:"0.35em",color:C.gold,fontWeight:600}}>MÓDULO 05</div>
         <div style={{fontSize:22,fontWeight:300,marginTop:4}}>Liquidación de Perfumes Sellados</div>
@@ -1718,7 +1718,7 @@ function PaymentsView({sales,setSales,settlements,setSettlements,settings}){
         <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:10,fontWeight:600}}>GASTOS DE VENTA</div>
         <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:10}}>
           {expenses.map(e=>(
-            <div key={e.id} className="gRowStack" style={{display:"grid",gridTemplateColumns:"1fr 140px 30px",gap:8}}>
+            <div key={e.id} style={{display:"grid",gridTemplateColumns:"1fr 140px 30px",gap:8}}>
               <Field label="DESCRIPCIÓN" type="text" value={e.label} onChange={ev=>updateExpense(e.id,"label",ev.target.value)}/>
               <Field label="MONTO" prefix="S/" value={e.amount} onChange={ev=>updateExpense(e.id,"amount",ev.target.value)}/>
               <button onClick={()=>removeExpense(e.id)} style={{height:36,marginTop:18,background:"transparent",
@@ -1731,7 +1731,7 @@ function PaymentsView({sales,setSales,settlements,setSettlements,settings}){
 
       <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px",marginBottom:14}}>
         <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:14,fontWeight:600}}>RESUMEN DE LA LIQUIDACIÓN</div>
-        <div className="g2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:18}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:18}}>
           <div>
             {[["Ventas",totalVenta],["Costo de ventas",totalCosto],["Utilidad Bruta",utilidadBruta],
               ["Gastos de venta",-totalGastos],["Utilidad Neta",utilidadNeta]].map(([l,v],i)=>(
@@ -1879,7 +1879,7 @@ function QuoteDoc({quote,settings}){
         </div>
       )}
 
-      <div className="g2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,
         fontFamily:"Helvetica,Arial,sans-serif",fontSize:10,color:"#5c5848",
         borderTop:"1px solid #e8e2d0",paddingTop:16,marginBottom:14}}>
         <div>
@@ -2058,7 +2058,7 @@ function QuotesView({inventory,quotes,setQuotes,settings}){
   const removeQuote = id => setQuotes(prev=>prev.filter(q=>q.id!==id));
 
   return(
-    <div className="view-scroll" style={{height:"100%",overflowY:"auto",padding:28}}>
+    <div style={{height:"100vh",overflowY:"auto",padding:28}}>
       <div style={{marginBottom:22}}>
         <div style={{fontSize:9,letterSpacing:"0.35em",color:C.gold,fontWeight:600}}>MÓDULO 04</div>
         <div style={{fontSize:22,fontWeight:300,marginTop:4}}>Cotizaciones para Clientes</div>
@@ -2069,14 +2069,14 @@ function QuotesView({inventory,quotes,setQuotes,settings}){
 
       <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px",marginBottom:14}}>
         <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:12,fontWeight:600}}>NUEVA COTIZACIÓN</div>
-        <div className="g2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:14}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:14}}>
           <Field label="CLIENTE" type="text" value={form.clientName} onChange={e=>setForm({...form,clientName:e.target.value})}/>
           <Field label="TELÉFONO / WHATSAPP" type="text" value={form.clientPhone} onChange={e=>setForm({...form,clientPhone:e.target.value})}/>
         </div>
         <div style={{fontSize:8,letterSpacing:"0.18em",color:C.dim,marginBottom:8,fontWeight:600}}>PRODUCTOS</div>
         <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:10}}>
           {form.items.map(row=>(
-            <div key={row.id} className="gRowStack" style={{display:"grid",gridTemplateColumns:"1.1fr 1.1fr 1fr 60px 90px 30px",gap:8,alignItems:"end"}}>
+            <div key={row.id} style={{display:"grid",gridTemplateColumns:"1.1fr 1.1fr 1fr 60px 90px 30px",gap:8,alignItems:"end"}}>
               <Select label="PERFUME" value={row.itemId} onChange={e=>updateRow(row.id,"itemId",e.target.value)}
                 options={[{value:"",label:"— Personalizado —"},...inventory.map(i=>({value:String(i.id),label:i.name}))]}/>
               <Field label="NOMBRE (SI ES PERSONALIZADO)" type="text" value={row.name}
@@ -2107,7 +2107,7 @@ function QuotesView({inventory,quotes,setQuotes,settings}){
         {quotes.length===0
           ? <div style={{padding:"16px 18px",fontSize:10,color:C.dim}}>Aún no hay cotizaciones generadas.</div>
           : quotes.map(q=>(
-            <div key={q.id} className="gRowStack" style={{display:"grid",gridTemplateColumns:"90px 1fr 90px 130px 1fr",gap:10,
+            <div key={q.id} style={{display:"grid",gridTemplateColumns:"90px 1fr 90px 130px 1fr",gap:10,
               padding:"11px 18px",borderBottom:`1px solid ${C.brd}`,alignItems:"center"}}>
               <div style={{fontSize:10,color:C.gold}}>{q.number}</div>
               <div>
@@ -2158,7 +2158,7 @@ function ProfView({settings,setSettings}){
   const commitStr = (f) => setSettings(p=>({...p,[f]:draft[f]}));
 
   return(
-    <div className="view-scroll" style={{height:"100%",overflowY:"auto",padding:28}}>
+    <div style={{height:"100vh",overflowY:"auto",padding:28}}>
       <div style={{marginBottom:24}}>
         <div style={{fontSize:9,letterSpacing:"0.35em",color:C.gold,fontWeight:600}}>MÓDULO 06</div>
         <div style={{fontSize:22,fontWeight:300,marginTop:4}}>Distribución de Utilidades</div>
@@ -2167,7 +2167,7 @@ function ProfView({settings,setSettings}){
         </div>
       </div>
 
-      <div className="g2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
         {[
           {name:settings.partnerA,amount:shareE,pct:splitE,color:C.gold,sub:"Director Comercial"},
           {name:settings.partnerB,amount:shareM,pct:100-splitE,color:C.sub,sub:"Director Operativo"},
@@ -2226,7 +2226,7 @@ function ProfView({settings,setSettings}){
         <div style={{fontSize:8.5,color:C.dim,marginTop:8}}>Vista ilustrativa — actualízala con tus cierres reales.</div>
       </div>
 
-      <div className="gKpi4" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
         <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"14px 16px"}}>
           <div style={kpiLabelStyle}>MARGEN NETO TOTAL</div>
           <NumberInput value={draft.monthlyMargin}
@@ -2303,7 +2303,7 @@ function SettingsView({settings,setSettings}){
   );
 
   return(
-    <div className="view-scroll" style={{height:"100%",overflowY:"auto",padding:28}}>
+    <div style={{height:"100vh",overflowY:"auto",padding:28}}>
       <div style={{marginBottom:24}}>
         <div style={{fontSize:9,letterSpacing:"0.35em",color:C.gold,fontWeight:600}}>MÓDULO 00</div>
         <div style={{fontSize:22,fontWeight:300,marginTop:4}}>Configuración General</div>
@@ -2312,14 +2312,14 @@ function SettingsView({settings,setSettings}){
         </div>
       </div>
 
-      <div className="g2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:14}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:14}}>
         <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px",display:"flex",flexDirection:"column",gap:9}}>
           <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:4,fontWeight:600}}>FINANZAS</div>
           <SF label="TIPO DE CAMBIO USD → PEN" prefix="S/" f="tc"/>
           <SF label={`SPLIT ${(draft.partnerA||"").toUpperCase()} % (PREDETERMINADO)`} prefix="%" f="splitDefault"
             transform={v=>Math.min(100,Math.max(0,parseFloat(v)||0))}/>
           <SF label="MARGEN MÍNIMO SOBRE COSTO" prefix="%" f="minMarginPct"/>
-          <div className="g2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
             <SF label="NOMBRE SOCIO A" type="text" f="partnerA"/>
             <SF label="NOMBRE SOCIO B" type="text" f="partnerB"/>
           </div>
@@ -2327,7 +2327,7 @@ function SettingsView({settings,setSettings}){
         <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px",display:"flex",flexDirection:"column",gap:9}}>
           <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:4,fontWeight:600}}>MARCA & COTIZACIONES</div>
           <SF label="NOMBRE DE LA MARCA" type="text" f="businessName"/>
-          <div className="g2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
             <SF label="TELÉFONO / WHATSAPP" type="text" f="contactPhone"/>
             <SF label="INSTAGRAM" type="text" f="contactInstagram"/>
           </div>
@@ -2336,7 +2336,7 @@ function SettingsView({settings,setSettings}){
         </div>
       </div>
 
-      <div className="g2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:14}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:14}}>
         <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px"}}>
           <STA label="MÉTODOS DE PAGO" f="paymentMethods" rows={3}/>
         </div>
@@ -2353,9 +2353,9 @@ function SettingsView({settings,setSettings}){
 }
 
 // ── SIDEBAR ─────────────────────────────────────────────────────────────────
-function Sidebar({view,go,settings,syncing,syncError,lastSync,onRefresh,isMobileMenuOpen}){
+function Sidebar({view,go,settings,syncing,syncError,lastSync,onRefresh}){
   return(
-    <aside className={`sidebar${isMobileMenuOpen?" sidebar-open":""}`} style={{width:200,height:"100vh",background:C.sf,
+    <aside style={{width:200,height:"100vh",background:C.sf,
       borderRight:`1px solid ${C.brd}`,display:"flex",flexDirection:"column",flexShrink:0}}>
       <div style={{padding:"26px 22px 20px",borderBottom:`1px solid ${C.brd}`}}>
         <div style={{fontSize:11,letterSpacing:"0.42em",fontWeight:700,color:C.gold}}>
@@ -2411,7 +2411,6 @@ export default function App(){
   const [syncing,setSyncing] = useState(false);
   const [syncError,setSyncError] = useState(false);
   const [lastSync,setLastSync] = useState(null);
-  const [isMobileMenuOpen,setIsMobileMenuOpen] = useState(false);
   const saveTimer = useRef(null);
 
   useEffect(()=>{
@@ -2502,8 +2501,6 @@ export default function App(){
     return true;
   };
 
-  const goView = (id) => { setView(id); setIsMobileMenuOpen(false); };
-
   return(
     <>
       <style>{`
@@ -2517,78 +2514,25 @@ export default function App(){
         ::-webkit-scrollbar-thumb{background:#28282E;border-radius:2px;}
         button:focus{outline:none;}
         select{cursor:pointer;}
-
-        /* ── Drawer sidebar (desktop = static column, mobile = off-canvas) ── */
-        .sidebar{ transition: transform 0.25s ease; }
-        .mobile-topbar{ display:none; }
-        .mobile-backdrop{ display:none; }
-
-        /* ── Responsive grids (mobile only; desktop keeps the inline ratios) ── */
-        @media (max-width:768px){
-          .content-col{ width:100%; }
-          .mobile-topbar{
-            display:flex; align-items:center; justify-content:space-between;
-            padding:12px 16px; background:${C.sf}; border-bottom:1px solid ${C.brd};
-            position:sticky; top:0; z-index:50; flex-shrink:0;
-          }
-          .mobile-topbar-brand{ font-size:12px; letter-spacing:0.3em; font-weight:700; color:${C.gold}; }
-          .mobile-menu-btn{
-            background:transparent; border:1px solid ${C.brd}; border-radius:4px;
-            color:${C.gold}; font-size:18px; padding:6px 13px; line-height:1; min-height:40px;
-          }
-          .sidebar{
-            position:fixed; top:0; left:0; height:100vh; z-index:200;
-            transform:translateX(-100%);
-            box-shadow:8px 0 30px rgba(0,0,0,0.55);
-          }
-          .sidebar.sidebar-open{ transform:translateX(0); }
-          .mobile-backdrop{
-            display:block; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:150;
-          }
-
-          .view-scroll{ padding:16px !important; }
-
-          .g2{ grid-template-columns:1fr !important; gap:10px !important; }
-          .g3{ grid-template-columns:1fr !important; gap:10px !important; }
-          .gKpi4{ grid-template-columns:1fr 1fr !important; gap:8px !important; }
-          .gRowStack{ grid-template-columns:1fr !important; gap:6px !important; }
-          .field-flex{ flex:1 1 100% !important; }
-
-          /* Safari iOS: inputs/selects below 16px trigger an auto-zoom on focus */
-          input, select, textarea{ font-size:16px !important; }
-
-          /* keep every touch target comfortably tappable without rewriting each button */
-          button{ min-height:38px; }
-        }
-
-        /* horizontal scroll fallback for any wide table/chart card instead of breaking the layout */
-        .table-scroll{ overflow-x:auto; -webkit-overflow-scrolling:touch; }
       `}</style>
-      <div className="app-shell" style={{display:"flex",height:"100vh",overflow:"hidden",
+      <div style={{display:"flex",height:"100vh",overflow:"hidden",
         background:C.bg,color:C.text,
         fontFamily:"Inter,'Helvetica Neue',-apple-system,system-ui,sans-serif"}}>
-        <Sidebar view={view} go={goView} settings={store.settings} isMobileMenuOpen={isMobileMenuOpen}
+        <Sidebar view={view} go={setView} settings={store.settings}
           syncing={syncing} syncError={syncError} lastSync={lastSync} onRefresh={manualRefresh}/>
-        {isMobileMenuOpen && <div className="mobile-backdrop" onClick={()=>setIsMobileMenuOpen(false)}/>}
-        <div className="content-col" style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",minWidth:0}}>
-          <header className="mobile-topbar">
-            <span className="mobile-topbar-brand">{(store.settings.businessName||"ELEGANZZA").toUpperCase()}</span>
-            <button className="mobile-menu-btn" onClick={()=>setIsMobileMenuOpen(true)} aria-label="Abrir menú">☰</button>
-          </header>
-          <main style={{flex:1,overflow:"hidden"}}>
-            {view==="dash" && <DashView sim={sim} setSim={setSim} inventory={store.inventory}
-              sales={store.sales} setSales={setSales} settings={store.settings} setSettings={setSettings}
-              setInventory={setInventory}/>}
-            {view==="import" && <ImportView imp={store.imp} setImp={setImp} settings={store.settings}/>}
-            {view==="inventory" && <InventoryView inventory={store.inventory} setInventory={setInventory}
-              settings={store.settings} sellDecant={sellDecant}/>}
-            {view==="quotes" && <QuotesView inventory={store.inventory} quotes={store.quotes}
-              setQuotes={setQuotes} settings={store.settings}/>}
-            {view==="payments" && <PaymentsView sales={store.sales} setSales={setSales} settlements={store.settlements||[]} setSettlements={setSettlements} settings={store.settings}/>}
-            {view==="profits" && <ProfView settings={store.settings} setSettings={setSettings}/>}
-            {view==="settings" && <SettingsView settings={store.settings} setSettings={setSettings}/>}
-          </main>
-        </div>
+        <main style={{flex:1,overflow:"hidden"}}>
+          {view==="dash" && <DashView sim={sim} setSim={setSim} inventory={store.inventory}
+            sales={store.sales} setSales={setSales} settings={store.settings} setSettings={setSettings}
+            setInventory={setInventory}/>}
+          {view==="import" && <ImportView imp={store.imp} setImp={setImp} settings={store.settings}/>}
+          {view==="inventory" && <InventoryView inventory={store.inventory} setInventory={setInventory}
+            settings={store.settings} sellDecant={sellDecant}/>}
+          {view==="quotes" && <QuotesView inventory={store.inventory} quotes={store.quotes}
+            setQuotes={setQuotes} settings={store.settings}/>}
+          {view==="payments" && <PaymentsView sales={store.sales} setSales={setSales} settlements={store.settlements||[]} setSettlements={setSettlements} settings={store.settings}/>}
+          {view==="profits" && <ProfView settings={store.settings} setSettings={setSettings}/>}
+          {view==="settings" && <SettingsView settings={store.settings} setSettings={setSettings}/>}
+        </main>
       </div>
     </>
   );
