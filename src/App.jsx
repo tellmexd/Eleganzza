@@ -71,11 +71,21 @@ const DEFAULT_INVENTORY = [
 
 const DEFAULT_SALES = [];
 
-const DEFAULT_IMPORT = {
-  name:"Creed Aventus 100ml",priceUSD:120,units:5,
-  discount:0,tax:8,tc:3.72,ship:150,customs:80,
-  repack:20,local:15,travel:0,splitE:65,
+const EMPTY_IMPORT_DRAFT = {
+  name:"",priceUSD:0,units:1,
+  discount:0,tax:8,tc:3.72,ship:0,customs:0,
+  repack:0,local:0,travel:0,splitE:65,
 };
+
+const DEFAULT_IMPORT = [
+  {
+    id:1,
+    createdAt:"1 Ene 2025",
+    name:"Creed Aventus 100ml",priceUSD:120,units:5,
+    discount:0,tax:8,tc:3.72,ship:150,customs:80,
+    repack:20,local:15,travel:0,splitE:65,
+  },
+];
 
 const TREND = [
   {m:"Ene",v:8200},{m:"Feb",v:11400},{m:"Mar",v:9800},
@@ -109,7 +119,7 @@ function buildDefaults(){
     sales: DEFAULT_SALES.map(s=>({...s})),
     quotes: [],
     settlements: [],
-    imp: {...DEFAULT_IMPORT},
+    imp: DEFAULT_IMPORT.map(i=>({...i})),
   };
 }
 
@@ -119,7 +129,14 @@ async function loadStore(){
     const { data } = await supabase
       .from('store').select('data')
       .eq('key', STORE_KEY).single()
-    if(data) return { ...defaults, ...JSON.parse(data.data) }
+    if(data){
+      const parsed = JSON.parse(data.data);
+      // ── MIGRATION: imp was a single object, now it's an array ──
+      if(parsed.imp && !Array.isArray(parsed.imp)){
+        parsed.imp = [{ ...parsed.imp, id: Date.now(), createdAt: todayFull() }];
+      }
+      return { ...defaults, ...parsed };
+    }
   }catch(e){}
   await saveStore(defaults)
   return defaults
@@ -267,8 +284,17 @@ function LoadingScreen(){
 
 // ── QUICK SALE FORM (Dashboard) ─────────────────────────────────────────────
 function QuickSaleForm({inventory,settings,initial,submitLabel,onSubmit,onCancel}){
+  const todayISO = () => new Date().toISOString().slice(0,10);
+  const isoToLabel = (iso) => {
+    if(!iso) return todayLabel();
+    const [y,m,d] = iso.split("-");
+    return `${parseInt(d)} ${MESES[parseInt(m)-1]} ${y}`;
+  };
   const [f,setF] = useState(()=>{
-    if(!initial) return {client:"",itemId:"",custom:"",amount:"",cost:"",kind:"sellada",status:"pending"};
+    if(!initial) return {client:"",itemId:"",custom:"",amount:"",cost:"",kind:"sellada",status:"pending",dateISO:todayISO()};
+    // parse existing date label back to ISO best-effort, fall back to today
+    let dateISO = todayISO();
+    if(initial.dateISO) dateISO = initial.dateISO;
     return {
       client: initial.client||"",
       itemId: initial.itemId!=null ? String(initial.itemId) : "",
@@ -277,6 +303,7 @@ function QuickSaleForm({inventory,settings,initial,submitLabel,onSubmit,onCancel
       cost: String(initial.cost??""),
       kind: initial.kind==="otro" ? "otro" : "sellada",
       status: initial.status||"pending",
+      dateISO,
     };
   });
   const item = inventory.find(i=>String(i.id)===String(f.itemId));
@@ -295,6 +322,8 @@ function QuickSaleForm({inventory,settings,initial,submitLabel,onSubmit,onCancel
       client:f.client.trim(), product, amount, status:f.status, kind:f.kind,
       itemId: item?item.id:null, cost,
       splitE: item?item.splitE:settings.splitDefault,
+      dateISO: f.dateISO,
+      date: isoToLabel(f.dateISO),
     });
   };
 
@@ -316,9 +345,23 @@ function QuickSaleForm({inventory,settings,initial,submitLabel,onSubmit,onCancel
       {!f.itemId && (
         <Field label="DESCRIPCIÓN DEL PRODUCTO" type="text" value={f.custom} onChange={e=>setF({...f,custom:e.target.value})}/>
       )}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
         <Field label="MONTO (VENTA)" prefix="S/" value={f.amount} onChange={e=>setF({...f,amount:e.target.value})}/>
         <Field label="COSTO" prefix="S/" value={f.cost} onChange={e=>setF({...f,cost:e.target.value})}/>
+        <div>
+          <div style={{fontSize:8,letterSpacing:"0.18em",color:C.dim,marginBottom:4,fontWeight:600}}>FECHA DE VENTA</div>
+          <div style={{display:"flex",background:C.el,border:`1px solid ${C.brd}`,borderRadius:3,overflow:"hidden",alignItems:"center"}}>
+            <input type="date" value={f.dateISO} onChange={e=>setF({...f,dateISO:e.target.value})}
+              style={{flex:1,minWidth:0,padding:"8px 10px",background:"transparent",border:"none",
+                color:C.text,fontSize:12,outline:"none",fontFamily:"inherit",
+                colorScheme:"dark"}}/>
+          </div>
+          {f.dateISO !== todayISO() && (
+            <div style={{fontSize:8,color:C.warn,marginTop:3,letterSpacing:"0.04em"}}>
+              ⚠ Venta pasada · {isoToLabel(f.dateISO)}
+            </div>
+          )}
+        </div>
       </div>
       <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
         <button onClick={onCancel} style={btnGhost}>Cancelar</button>
@@ -354,8 +397,10 @@ function DashView({sim,setSim,inventory,sales,setSales,settings,setSettings}){
       setSales(prev=>prev.map(s=>s.id===formMode.sale.id ? {...s, ...payload} : s));
     } else {
       setSales(prev=>[{
-        id:Date.now(), date:todayLabel(), ml:null,
+        id:Date.now(), ml:null,
         paidToSocio:false, paidDate:null, settlementId:null,
+        date: payload.date || todayLabel(),
+        dateISO: payload.dateISO || new Date().toISOString().slice(0,10),
         ...payload,
       }, ...prev]);
     }
@@ -546,19 +591,67 @@ function DashView({sim,setSim,inventory,sales,setSales,settings,setSettings}){
 
 // ── IMPORT VIEW ─────────────────────────────────────────────────────────────
 function ImportView({imp,setImp,settings}){
-  const upd = (f,v) => setImp(p=>({...p,[f]:f==="name"?v:(parseFloat(v)||0)}));
-  const syncFromSettings = () => setImp(p=>({...p,tc:settings.tc,splitE:settings.splitDefault}));
-  const R = useMemo(()=>{
-    const bUSD = imp.priceUSD * imp.units * (1 - imp.discount/100);
-    const bPEN = bUSD * imp.tc;
-    const tax  = bPEN * (imp.tax/100);
+  // imp is now an array of batches; selectedId tracks which is active
+  const batches = Array.isArray(imp) ? imp : [imp];
+  const [selectedId,setSelectedId] = useState(()=> batches.length>0 ? batches[0].id : null);
+  const [creating,setCreating] = useState(false);
+  const [draft,setDraft] = useState({...EMPTY_IMPORT_DRAFT});
+
+  const selected = batches.find(b=>b.id===selectedId) || batches[0] || null;
+
+  const upd = (f,v) => {
+    setImp(prev=>{
+      const arr = Array.isArray(prev) ? prev : [prev];
+      return arr.map(b=>b.id===selectedId ? {...b,[f]:f==="name"?v:(parseFloat(v)||0)} : b);
+    });
+  };
+
+  const syncFromSettings = () => {
+    setImp(prev=>{
+      const arr = Array.isArray(prev) ? prev : [prev];
+      return arr.map(b=>b.id===selectedId ? {...b,tc:settings.tc,splitE:settings.splitDefault} : b);
+    });
+  };
+
+  const saveDraft = () => {
+    if(!draft.name.trim()) return;
+    const newBatch = {
+      ...draft,
+      id: Date.now(),
+      createdAt: todayFull(),
+    };
+    setImp(prev=>{
+      const arr = Array.isArray(prev) ? prev : [prev];
+      return [newBatch, ...arr];
+    });
+    setSelectedId(newBatch.id);
+    setCreating(false);
+    setDraft({...EMPTY_IMPORT_DRAFT});
+  };
+
+  const removeBatch = (id) => {
+    setImp(prev=>{
+      const arr = Array.isArray(prev) ? prev : [prev];
+      const next = arr.filter(b=>b.id!==id);
+      return next;
+    });
+    if(selectedId===id){
+      const remaining = batches.filter(b=>b.id!==id);
+      setSelectedId(remaining.length>0 ? remaining[0].id : null);
+    }
+  };
+
+  const R = selected ? (() => {
+    const bUSD = selected.priceUSD * selected.units * (1 - selected.discount/100);
+    const bPEN = bUSD * selected.tc;
+    const tax  = bPEN * (selected.tax/100);
     const prod = bPEN + tax;
-    const log  = imp.ship + imp.customs + imp.repack + imp.local + imp.travel;
+    const log  = selected.ship + selected.customs + selected.repack + selected.local + selected.travel;
     const total = prod + log;
-    const unit  = imp.units>0 ? total/imp.units : 0;
-    const logU  = imp.units>0 ? log/imp.units : 0;
+    const unit  = selected.units>0 ? total/selected.units : 0;
+    const logU  = selected.units>0 ? log/selected.units : 0;
     return {bUSD,bPEN,tax,prod,log,total,unit,logU};
-  },[imp]);
+  })() : null;
 
   const RRow = ({label,value,accent,large,isLight}) => (
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
@@ -583,137 +676,261 @@ function ImportView({imp,setImp,settings}){
         <div style={{fontSize:9,letterSpacing:"0.35em",color:C.gold,fontWeight:600}}>MÓDULO 01</div>
         <div style={{fontSize:22,fontWeight:300,marginTop:4}}>Motor de Costeo · Importación</div>
         <div style={{fontSize:10.5,color:C.dim,marginTop:5}}>
-          Los gastos logísticos se prorratean automáticamente por unidad importada.
+          Los gastos logísticos se prorratean automáticamente por unidad importada. Cada lote guarda el TC y prorrateo exacto del momento.
         </div>
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-        {/* LEFT */}
-        <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-              <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,fontWeight:600}}>IDENTIFICACIÓN</div>
-              <button onClick={syncFromSettings} style={{...btnGhost,padding:"4px 9px",fontSize:8.5}}>
-                ↺ usar TC/Split de Configuración
-              </button>
-            </div>
-            <div style={{display:"flex",flexDirection:"column",gap:9}}>
-              <Field label="NOMBRE DEL PRODUCTO" type="text" value={imp.name}
-                onChange={e=>upd("name",e.target.value)}/>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
-                <Field label="TIPO DE CAMBIO" prefix="S/" value={imp.tc}
-                  onChange={e=>upd("tc",e.target.value)}/>
-                <Field label={`SPLIT ${settings.partnerA.toUpperCase()}`} prefix="%" value={imp.splitE}
-                  onChange={e=>upd("splitE",e.target.value)}/>
-              </div>
-            </div>
+      {/* ── BATCH HISTORY PANEL ── */}
+      <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"16px 20px",marginBottom:16}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,fontWeight:600}}>
+            LOTES DE IMPORTACIÓN · {batches.length} registrado{batches.length!==1?"s":""}
           </div>
-
-          <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px"}}>
-            <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:12,fontWeight:600}}>
-              COMPRA EN ORIGEN (USA)
-            </div>
-            <div style={{display:"flex",flexDirection:"column",gap:9}}>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
-                <Field label="PRECIO UNITARIO" prefix="USD" value={imp.priceUSD}
-                  onChange={e=>upd("priceUSD",e.target.value)}/>
-                <Field label="UNIDADES" step="1" value={imp.units}
-                  onChange={e=>upd("units",e.target.value)}/>
-              </div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
-                <Field label="DESCUENTO" prefix="%" value={imp.discount}
-                  onChange={e=>upd("discount",e.target.value)}/>
-                <Field label="ARANCELES / TAXES" prefix="%" value={imp.tax}
-                  onChange={e=>upd("tax",e.target.value)}/>
-              </div>
-              <Sub label="Subtotal producto (S/)" value={R.prod}/>
-            </div>
-          </div>
-
-          <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px"}}>
-            <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:12,fontWeight:600}}>
-              COSTOS LOGÍSTICOS (S/)
-            </div>
-            <div style={{display:"flex",flexDirection:"column",gap:9}}>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
-                <Field label="ENVÍO USA → PERÚ" value={imp.ship}
-                  onChange={e=>upd("ship",e.target.value)}/>
-                <Field label="DESADUANAJE" value={imp.customs}
-                  onChange={e=>upd("customs",e.target.value)}/>
-              </div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:9}}>
-                <Field label="REEMPAQUE" value={imp.repack}
-                  onChange={e=>upd("repack",e.target.value)}/>
-                <Field label="SHALOM/COMBI" value={imp.local}
-                  onChange={e=>upd("local",e.target.value)}/>
-                <Field label="PASAJES" value={imp.travel}
-                  onChange={e=>upd("travel",e.target.value)}/>
-              </div>
-              <Sub label="Total logística (S/)" value={R.log}/>
-            </div>
-          </div>
+          <button onClick={()=>{setCreating(c=>!c); setDraft({...EMPTY_IMPORT_DRAFT,tc:settings.tc,splitE:settings.splitDefault});}}
+            style={creating ? btnGhost : btnGold}>
+            {creating ? "✕ Cancelar" : "+ Nuevo lote"}
+          </button>
         </div>
 
-        {/* RIGHT */}
-        <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px"}}>
-            <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:12,fontWeight:600}}>
-              DESGLOSE FINAL
-            </div>
-            <RRow label="Base USD convertida" value={R.bPEN}/>
-            <RRow label={`Aranceles (${imp.tax}%)`} value={R.tax}/>
-            <RRow label="Subtotal Producto" value={R.prod}/>
-            <RRow label="Total Logística" value={R.log}/>
-            <div style={{height:1,background:C.gold,opacity:0.2,margin:"10px 0"}}/>
-            <RRow label="COSTO TOTAL (S/)" value={R.total} large accent/>
-            <RRow label={`Costo / Unidad (${imp.units}u)`} value={R.unit} accent/>
-            <RRow label="Logística / Unidad" value={R.logU} isLight/>
-          </div>
-
-          <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px"}}>
-            <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:14,fontWeight:600}}>
-              CAPITAL INVERTIDO POR SOCIO
-            </div>
-            {[
-              [settings.partnerA, imp.splitE, R.total*(imp.splitE/100), C.gold],
-              [settings.partnerB, 100-imp.splitE, R.total*((100-imp.splitE)/100), C.sub],
-            ].map(([name,pct,amount,color])=>(
-              <div key={name} style={{marginBottom:16}}>
-                <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
-                  <span style={{fontSize:11,color:C.sub}}>{name}</span>
-                  <span style={{fontSize:22,fontWeight:200,color}}>{sol(amount,2)}</span>
-                </div>
-                <div style={{height:2,background:C.brd,borderRadius:2}}>
-                  <div style={{height:"100%",background:color,borderRadius:2,
-                    width:`${pct}%`,transition:"width 0.3s"}}/>
-                </div>
-                <div style={{fontSize:8.5,color:C.dim,marginTop:3}}>{pct}% del capital total</div>
+        {creating && (
+          <div style={{background:C.el,borderRadius:3,padding:"14px 16px",marginBottom:14,
+            border:`1px solid ${C.gold}33`}}>
+            <div style={{fontSize:8,letterSpacing:"0.2em",color:C.gold,marginBottom:10,fontWeight:600}}>NUEVO LOTE</div>
+            <div style={{display:"flex",flexDirection:"column",gap:9}}>
+              <Field label="NOMBRE DEL PRODUCTO" type="text" value={draft.name}
+                onChange={e=>setDraft(p=>({...p,name:e.target.value}))}/>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:9}}>
+                <Field label="PRECIO USD" prefix="USD" value={draft.priceUSD}
+                  onChange={e=>setDraft(p=>({...p,priceUSD:parseFloat(e.target.value)||0}))}/>
+                <Field label="UNIDADES" step="1" value={draft.units}
+                  onChange={e=>setDraft(p=>({...p,units:parseFloat(e.target.value)||0}))}/>
+                <Field label="TIPO DE CAMBIO" prefix="S/" value={draft.tc}
+                  onChange={e=>setDraft(p=>({...p,tc:parseFloat(e.target.value)||0}))}/>
+                <Field label={`SPLIT ${settings.partnerA.toUpperCase()}%`} prefix="%" value={draft.splitE}
+                  onChange={e=>setDraft(p=>({...p,splitE:parseFloat(e.target.value)||0}))}/>
               </div>
-            ))}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:9}}>
+                <Field label="DESCUENTO %" prefix="%" value={draft.discount}
+                  onChange={e=>setDraft(p=>({...p,discount:parseFloat(e.target.value)||0}))}/>
+                <Field label="ARANCELES %" prefix="%" value={draft.tax}
+                  onChange={e=>setDraft(p=>({...p,tax:parseFloat(e.target.value)||0}))}/>
+                <Field label="ENVÍO USA→PE" value={draft.ship}
+                  onChange={e=>setDraft(p=>({...p,ship:parseFloat(e.target.value)||0}))}/>
+                <Field label="DESADUANAJE" value={draft.customs}
+                  onChange={e=>setDraft(p=>({...p,customs:parseFloat(e.target.value)||0}))}/>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9}}>
+                <Field label="REEMPAQUE" value={draft.repack}
+                  onChange={e=>setDraft(p=>({...p,repack:parseFloat(e.target.value)||0}))}/>
+                <Field label="SHALOM/COMBI" value={draft.local}
+                  onChange={e=>setDraft(p=>({...p,local:parseFloat(e.target.value)||0}))}/>
+                <Field label="PASAJES" value={draft.travel}
+                  onChange={e=>setDraft(p=>({...p,travel:parseFloat(e.target.value)||0}))}/>
+              </div>
+              <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+                <button onClick={()=>{setCreating(false);setDraft({...EMPTY_IMPORT_DRAFT});}} style={btnGhost}>Cancelar</button>
+                <button onClick={saveDraft} disabled={!draft.name.trim()}
+                  style={{...btnGold,opacity:draft.name.trim()?1:0.4}}>
+                  ✓ Guardar lote
+                </button>
+              </div>
+            </div>
           </div>
+        )}
 
-          <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px"}}>
-            <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:12,fontWeight:600}}>
-              COMPOSICIÓN DEL COSTO
-            </div>
-            <div style={{display:"flex",height:6,borderRadius:3,overflow:"hidden",marginBottom:12}}>
-              {R.total>0 && [[R.prod,C.gold],[R.log,C.sub]].map(([v,col],i)=>(
-                <div key={i} style={{flex:v,background:col,opacity:0.75}}/>
-              ))}
-            </div>
-            <div style={{display:"flex",gap:18}}>
-              {[["Producto",R.prod,C.gold],["Logística",R.log,C.sub]].map(([lbl,v,col])=>(
-                <div key={lbl} style={{display:"flex",alignItems:"center",gap:6}}>
-                  <div style={{width:7,height:7,background:col,borderRadius:1,opacity:0.75}}/>
-                  <span style={{fontSize:9,color:C.dim}}>
-                    {lbl} — {R.total>0?num((v/R.total)*100,1):0}%
-                  </span>
+        {/* Batch list */}
+        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+          {batches.length===0 && (
+            <div style={{fontSize:10,color:C.dim,padding:"8px 0"}}>No hay lotes registrados. Crea el primero.</div>
+          )}
+          {batches.map(b=>{
+            const bR = (()=>{
+              const bUSD2 = b.priceUSD * b.units * (1 - b.discount/100);
+              const bPEN2 = bUSD2 * b.tc;
+              const tax2  = bPEN2 * (b.tax/100);
+              const prod2 = bPEN2 + tax2;
+              const log2  = b.ship + b.customs + b.repack + b.local + b.travel;
+              const total2 = prod2 + log2;
+              const unit2  = b.units>0 ? total2/b.units : 0;
+              return {total:total2,unit:unit2};
+            })();
+            const isActive = selectedId===b.id;
+            return(
+              <div key={b.id} onClick={()=>setSelectedId(b.id)}
+                style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",
+                  borderRadius:3,cursor:"pointer",
+                  background:isActive?C.goldBg:C.el,
+                  border:`1px solid ${isActive?C.gold+"55":C.brd}`,
+                  transition:"all 0.15s"}}>
+                <div style={{width:6,height:6,borderRadius:"50%",flexShrink:0,
+                  background:isActive?C.gold:C.dim}}/>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:11,color:isActive?C.text:C.sub,
+                    fontWeight:isActive?500:400,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    {b.name||"Sin nombre"}
+                  </div>
+                  <div style={{fontSize:8.5,color:C.dim,marginTop:2}}>
+                    {b.createdAt} · TC {b.tc} · {b.units}u
+                  </div>
                 </div>
-              ))}
-            </div>
-          </div>
+                <div style={{textAlign:"right",flexShrink:0}}>
+                  <div style={{fontSize:12,color:isActive?C.gold:C.sub}}>{sol(bR.total,0)}</div>
+                  <div style={{fontSize:8.5,color:C.dim}}>{sol(bR.unit,2)}/u</div>
+                </div>
+                <button onClick={e=>{e.stopPropagation();removeBatch(b.id);}}
+                  title="Eliminar lote"
+                  style={{background:"transparent",border:"none",color:C.dim,cursor:"pointer",
+                    fontSize:14,padding:"0 2px",lineHeight:1,fontFamily:"inherit",flexShrink:0,
+                    transition:"color 0.15s"}}
+                  onMouseEnter={ev=>ev.target.style.color=C.err}
+                  onMouseLeave={ev=>ev.target.style.color=C.dim}>×</button>
+              </div>
+            );
+          })}
         </div>
       </div>
+
+      {/* ── SELECTED BATCH EDITOR ── */}
+      {selected && R && (
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+          {/* LEFT */}
+          <div style={{display:"flex",flexDirection:"column",gap:14}}>
+            <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                <div>
+                  <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,fontWeight:600}}>IDENTIFICACIÓN DEL LOTE</div>
+                  {selected.createdAt && (
+                    <div style={{fontSize:8.5,color:C.dim,marginTop:3}}>Registrado: {selected.createdAt}</div>
+                  )}
+                </div>
+                <button onClick={syncFromSettings} style={{...btnGhost,padding:"4px 9px",fontSize:8.5}}>
+                  ↺ usar TC/Split de Config.
+                </button>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:9}}>
+                <Field label="NOMBRE DEL PRODUCTO" type="text" value={selected.name}
+                  onChange={e=>upd("name",e.target.value)}/>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+                  <Field label="TIPO DE CAMBIO (fijado al registrar)" prefix="S/" value={selected.tc}
+                    onChange={e=>upd("tc",e.target.value)}/>
+                  <Field label={`SPLIT ${settings.partnerA.toUpperCase()}`} prefix="%" value={selected.splitE}
+                    onChange={e=>upd("splitE",e.target.value)}/>
+                </div>
+              </div>
+            </div>
+
+            <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px"}}>
+              <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:12,fontWeight:600}}>
+                COMPRA EN ORIGEN (USA)
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:9}}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+                  <Field label="PRECIO UNITARIO" prefix="USD" value={selected.priceUSD}
+                    onChange={e=>upd("priceUSD",e.target.value)}/>
+                  <Field label="UNIDADES" step="1" value={selected.units}
+                    onChange={e=>upd("units",e.target.value)}/>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+                  <Field label="DESCUENTO" prefix="%" value={selected.discount}
+                    onChange={e=>upd("discount",e.target.value)}/>
+                  <Field label="ARANCELES / TAXES" prefix="%" value={selected.tax}
+                    onChange={e=>upd("tax",e.target.value)}/>
+                </div>
+                <Sub label="Subtotal producto (S/)" value={R.prod}/>
+              </div>
+            </div>
+
+            <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px"}}>
+              <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:12,fontWeight:600}}>
+                COSTOS LOGÍSTICOS (S/)
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:9}}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+                  <Field label="ENVÍO USA → PERÚ" value={selected.ship}
+                    onChange={e=>upd("ship",e.target.value)}/>
+                  <Field label="DESADUANAJE" value={selected.customs}
+                    onChange={e=>upd("customs",e.target.value)}/>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:9}}>
+                  <Field label="REEMPAQUE" value={selected.repack}
+                    onChange={e=>upd("repack",e.target.value)}/>
+                  <Field label="SHALOM/COMBI" value={selected.local}
+                    onChange={e=>upd("local",e.target.value)}/>
+                  <Field label="PASAJES" value={selected.travel}
+                    onChange={e=>upd("travel",e.target.value)}/>
+                </div>
+                <Sub label="Total logística (S/)" value={R.log}/>
+              </div>
+            </div>
+          </div>
+
+          {/* RIGHT */}
+          <div style={{display:"flex",flexDirection:"column",gap:14}}>
+            <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px"}}>
+              <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:12,fontWeight:600}}>
+                DESGLOSE FINAL
+              </div>
+              <RRow label="Base USD convertida" value={R.bPEN}/>
+              <RRow label={`Aranceles (${selected.tax}%)`} value={R.tax}/>
+              <RRow label="Subtotal Producto" value={R.prod}/>
+              <RRow label="Total Logística" value={R.log}/>
+              <div style={{height:1,background:C.gold,opacity:0.2,margin:"10px 0"}}/>
+              <RRow label="COSTO TOTAL (S/)" value={R.total} large accent/>
+              <RRow label={`Costo / Unidad (${selected.units}u)`} value={R.unit} accent/>
+              <RRow label="Logística / Unidad" value={R.logU} isLight/>
+            </div>
+
+            <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px"}}>
+              <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:14,fontWeight:600}}>
+                CAPITAL INVERTIDO POR SOCIO
+              </div>
+              {[
+                [settings.partnerA, selected.splitE, R.total*(selected.splitE/100), C.gold],
+                [settings.partnerB, 100-selected.splitE, R.total*((100-selected.splitE)/100), C.sub],
+              ].map(([name,pct,amount,color])=>(
+                <div key={name} style={{marginBottom:16}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                    <span style={{fontSize:11,color:C.sub}}>{name}</span>
+                    <span style={{fontSize:22,fontWeight:200,color}}>{sol(amount,2)}</span>
+                  </div>
+                  <div style={{height:2,background:C.brd,borderRadius:2}}>
+                    <div style={{height:"100%",background:color,borderRadius:2,
+                      width:`${pct}%`,transition:"width 0.3s"}}/>
+                  </div>
+                  <div style={{fontSize:8.5,color:C.dim,marginTop:3}}>{pct}% del capital total</div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px"}}>
+              <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:12,fontWeight:600}}>
+                COMPOSICIÓN DEL COSTO
+              </div>
+              <div style={{display:"flex",height:6,borderRadius:3,overflow:"hidden",marginBottom:12}}>
+                {R.total>0 && [[R.prod,C.gold],[R.log,C.sub]].map(([v,col],i)=>(
+                  <div key={i} style={{flex:v,background:col,opacity:0.75}}/>
+                ))}
+              </div>
+              <div style={{display:"flex",gap:18}}>
+                {[["Producto",R.prod,C.gold],["Logística",R.log,C.sub]].map(([lbl,v,col])=>(
+                  <div key={lbl} style={{display:"flex",alignItems:"center",gap:6}}>
+                    <div style={{width:7,height:7,background:col,borderRadius:1,opacity:0.75}}/>
+                    <span style={{fontSize:9,color:C.dim}}>
+                      {lbl} — {R.total>0?num((v/R.total)*100,1):0}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!selected && !creating && (
+        <div style={{textAlign:"center",padding:"40px 0",color:C.dim,fontSize:11}}>
+          No hay lotes. Usa "+ Nuevo lote" para registrar tu primera importación.
+        </div>
+      )}
     </div>
   );
 }
