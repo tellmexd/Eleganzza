@@ -266,8 +266,19 @@ function LoadingScreen(){
 }
 
 // ── QUICK SALE FORM (Dashboard) ─────────────────────────────────────────────
-function QuickSaleForm({inventory,settings,onAdd,onCancel}){
-  const [f,setF] = useState({client:"",itemId:"",custom:"",amount:"",cost:"",kind:"sellada",status:"pending"});
+function QuickSaleForm({inventory,settings,initial,submitLabel,onSubmit,onCancel}){
+  const [f,setF] = useState(()=>{
+    if(!initial) return {client:"",itemId:"",custom:"",amount:"",cost:"",kind:"sellada",status:"pending"};
+    return {
+      client: initial.client||"",
+      itemId: initial.itemId!=null ? String(initial.itemId) : "",
+      custom: initial.itemId!=null ? "" : (initial.product||""),
+      amount: String(initial.amount??""),
+      cost: String(initial.cost??""),
+      kind: initial.kind==="otro" ? "otro" : "sellada",
+      status: initial.status||"pending",
+    };
+  });
   const item = inventory.find(i=>String(i.id)===String(f.itemId));
 
   const pickItem = (id) => {
@@ -280,11 +291,10 @@ function QuickSaleForm({inventory,settings,onAdd,onCancel}){
     const amount = parseFloat(f.amount)||0;
     const cost = parseFloat(f.cost)||0;
     const product = item ? `${item.name} (${f.kind==="sellada"?"Sellado":"Otro"})` : (f.custom.trim() || "Producto personalizado");
-    onAdd({
-      id: Date.now(), client:f.client.trim(), product, amount, status:f.status,
-      date: todayLabel(), kind: f.kind,
-      itemId: item?item.id:null, ml:null, cost,
-      splitE: item?item.splitE:settings.splitDefault, paidToSocio:false, paidDate:null, settlementId:null,
+    onSubmit({
+      client:f.client.trim(), product, amount, status:f.status, kind:f.kind,
+      itemId: item?item.id:null, cost,
+      splitE: item?item.splitE:settings.splitDefault,
     });
   };
 
@@ -312,7 +322,7 @@ function QuickSaleForm({inventory,settings,onAdd,onCancel}){
       </div>
       <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
         <button onClick={onCancel} style={btnGhost}>Cancelar</button>
-        <button onClick={submit} style={btnGold}>Registrar venta</button>
+        <button onClick={submit} style={btnGold}>{submitLabel||"Registrar venta"}</button>
       </div>
     </div>
   );
@@ -320,7 +330,7 @@ function QuickSaleForm({inventory,settings,onAdd,onCancel}){
 
 // ── DASHBOARD ───────────────────────────────────────────────────────────────
 function DashView({sim,setSim,inventory,sales,setSales,settings,setSettings}){
-  const [addingSale,setAddingSale] = useState(false);
+  const [formMode,setFormMode] = useState(null); // null | {type:"add"} | {type:"edit", sale}
   const up = (f,v) => setSim(p=>({...p,[f]:v}));
   const mg = useMemo(()=>{
     const g = sim.sale - sim.cost;
@@ -333,7 +343,24 @@ function DashView({sim,setSim,inventory,sales,setSales,settings,setSettings}){
   const pendientes = sales.filter(s=>s.status!=="paid");
   const cuentasXCobrar = pendientes.reduce((a,s)=>a+s.amount,0);
 
-  const addSale = (sale) => { setSales(prev=>[sale,...prev]); setAddingSale(false); };
+  const currentMonthAbbr = MESES[new Date().getMonth()];
+  const isThisMonth = (dateStr) => (dateStr||"").trim().split(" ")[1]===currentMonthAbbr;
+  const paidThisMonth = useMemo(()=> sales.filter(s=>s.status==="paid" && isThisMonth(s.date)), [sales, currentMonthAbbr]);
+  const ingresosNetos = paidThisMonth.reduce((a,s)=>a+s.amount,0);
+  const margenMensual = paidThisMonth.reduce((a,s)=>a+(s.amount-(s.cost||0)),0);
+
+  const handleSubmitForm = (payload) => {
+    if(formMode?.type==="edit"){
+      setSales(prev=>prev.map(s=>s.id===formMode.sale.id ? {...s, ...payload} : s));
+    } else {
+      setSales(prev=>[{
+        id:Date.now(), date:todayLabel(), ml:null,
+        paidToSocio:false, paidDate:null, settlementId:null,
+        ...payload,
+      }, ...prev]);
+    }
+    setFormMode(null);
+  };
 
   return(
     <div style={{height:"100vh",overflowY:"auto",padding:28}}>
@@ -346,23 +373,13 @@ function DashView({sim,setSim,inventory,sales,setSales,settings,setSettings}){
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
         <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"16px 18px"}}>
           <div style={kpiLabelStyle}>INGRESOS NETOS</div>
-          <div style={{display:"flex",alignItems:"baseline",gap:4}}>
-            <span style={{fontSize:13,color:C.dim}}>S/</span>
-            <NumberInput value={settings.monthlyRevenue}
-              onChange={n=>setSettings(p=>({...p,monthlyRevenue:n}))}
-              style={kpiInputStyle}/>
-          </div>
-          <div style={{marginTop:6,fontSize:9.5,color:C.dim}}>editable manualmente</div>
+          <div style={{fontSize:24,fontWeight:200}}>{sol(ingresosNetos,0)}</div>
+          <div style={{marginTop:6,fontSize:9.5,color:C.dim}}>ventas pagadas · {currentMonthAbbr}</div>
         </div>
         <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"16px 18px"}}>
           <div style={kpiLabelStyle}>MARGEN MENSUAL</div>
-          <div style={{display:"flex",alignItems:"baseline",gap:4}}>
-            <span style={{fontSize:13,color:C.dim}}>S/</span>
-            <NumberInput value={settings.monthlyMargin}
-              onChange={n=>setSettings(p=>({...p,monthlyMargin:n}))}
-              style={kpiInputStyle}/>
-          </div>
-          <div style={{marginTop:6,fontSize:9.5,color:C.dim}}>editable manualmente</div>
+          <div style={{fontSize:24,fontWeight:200,color:margenMensual>=0?C.text:C.err}}>{sol(margenMensual,0)}</div>
+          <div style={{marginTop:6,fontSize:9.5,color:C.dim}}>margen de ventas pagadas · {currentMonthAbbr}</div>
         </div>
         <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"16px 18px"}}>
           <div style={kpiLabelStyle}>CUENTAS × COBRAR</div>
@@ -478,18 +495,21 @@ function DashView({sim,setSim,inventory,sales,setSales,settings,setSettings}){
         <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"16px 18px"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
             <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,fontWeight:600}}>VENTAS RECIENTES</div>
-            <button onClick={()=>setAddingSale(v=>!v)} style={{...btnGhost,padding:"4px 10px"}}>
-              {addingSale?"✕ Cerrar":"+ Nueva venta"}
+            <button onClick={()=>setFormMode(m=>m?.type==="add"?null:{type:"add"})} style={{...btnGhost,padding:"4px 10px"}}>
+              {formMode?.type==="add"?"✕ Cerrar":"+ Nueva venta"}
             </button>
           </div>
-          {addingSale && (
-            <QuickSaleForm inventory={inventory} settings={settings} onAdd={addSale} onCancel={()=>setAddingSale(false)}/>
+          {formMode && (
+            <QuickSaleForm inventory={inventory} settings={settings}
+              initial={formMode.type==="edit" ? formMode.sale : null}
+              submitLabel={formMode.type==="edit" ? "Guardar cambios" : "Registrar venta"}
+              onSubmit={handleSubmitForm} onCancel={()=>setFormMode(null)}/>
           )}
           {sales.length===0 && (
             <div style={{fontSize:10,color:C.dim,padding:"10px 0"}}>No hay ventas registradas aún.</div>
           )}
           {sales.map(s=>(
-            <div key={s.id} style={{display:"grid",gridTemplateColumns:"52px 1fr 80px 90px 28px",
+            <div key={s.id} style={{display:"grid",gridTemplateColumns:"52px 1fr 80px 90px 48px",
               gap:8,padding:"8px 0",borderBottom:`1px solid ${C.brd}`,alignItems:"center"}}>
               <div style={{fontSize:9,color:C.dim}}>{s.date}</div>
               <div>
@@ -498,13 +518,24 @@ function DashView({sim,setSim,inventory,sales,setSales,settings,setSettings}){
               </div>
               <div style={{fontSize:12.5,fontWeight:200}}>{sol(s.amount,0)}</div>
               <Badge status={s.status}/>
-              <button onClick={()=>setSales(prev=>prev.filter(x=>x.id!==s.id))}
-                title="Eliminar venta"
-                style={{background:"transparent",border:"none",color:C.dim,cursor:"pointer",
-                  fontSize:14,padding:0,lineHeight:1,fontFamily:"inherit",
-                  transition:"color 0.15s"}}
-                onMouseEnter={e=>e.target.style.color=C.err}
-                onMouseLeave={e=>e.target.style.color=C.dim}>×</button>
+              <div style={{display:"flex",gap:6,justifyContent:"flex-end"}}>
+                {s.kind!=="decant" && (
+                  <button onClick={()=>setFormMode({type:"edit", sale:s})}
+                    title="Editar venta"
+                    style={{background:"transparent",border:"none",color:C.dim,cursor:"pointer",
+                      fontSize:12,padding:0,lineHeight:1,fontFamily:"inherit",
+                      transition:"color 0.15s"}}
+                    onMouseEnter={e=>e.target.style.color=C.gold}
+                    onMouseLeave={e=>e.target.style.color=C.dim}>✎</button>
+                )}
+                <button onClick={()=>setSales(prev=>prev.filter(x=>x.id!==s.id))}
+                  title="Eliminar venta"
+                  style={{background:"transparent",border:"none",color:C.dim,cursor:"pointer",
+                    fontSize:14,padding:0,lineHeight:1,fontFamily:"inherit",
+                    transition:"color 0.15s"}}
+                  onMouseEnter={e=>e.target.style.color=C.err}
+                  onMouseLeave={e=>e.target.style.color=C.dim}>×</button>
+              </div>
             </div>
           ))}
         </div>
@@ -946,6 +977,26 @@ function PaymentsView({sales,setSales,settlements,setSettlements,settings}){
     setExpenses([emptyExpenseRow()]);
   };
 
+  const restoreSalesFromSettlement = (record) => {
+    setSales(prev=>prev.map(s=> record.items.some(it=>it.id===s.id)
+      ? {...s, settlementId:null, paidToSocio:false, paidDate:null}
+      : s));
+  };
+
+  const deleteSettlement = (record) => {
+    if(!window.confirm("¿Eliminar esta liquidación? Las ventas incluidas volverán a la lista de pendientes de liquidar.")) return;
+    restoreSalesFromSettlement(record);
+    setSettlements(prev=>prev.filter(r=>r.id!==record.id));
+  };
+
+  const editSettlement = (record) => {
+    restoreSalesFromSettlement(record);
+    setSettlements(prev=>prev.filter(r=>r.id!==record.id));
+    setExpenses(record.gastos && record.gastos.length
+      ? record.gastos.map(g=>({id:Date.now()+Math.random(), label:g.label, amount:String(g.amount)}))
+      : [emptyExpenseRow()]);
+  };
+
   return(
     <div style={{height:"100vh",overflowY:"auto",padding:28}}>
       <div style={{marginBottom:22}}>
@@ -1056,7 +1107,7 @@ function PaymentsView({sales,setSales,settlements,setSettlements,settings}){
                   Ventas {sol(r.totalVenta,2)} · Costo {sol(r.totalCosto,2)} · Gastos {sol(r.totalGastos,2)} · Neta {sol(r.utilidadNeta,2)}
                 </div>
               </div>
-              <div style={{display:"flex",gap:16}}>
+              <div style={{display:"flex",gap:16,alignItems:"center"}}>
                 <div style={{textAlign:"right"}}>
                   <div style={{fontSize:8,color:C.dim}}>{settings.partnerA}</div>
                   <div style={{fontSize:12,color:C.gold}}>{sol(r.shareA,2)}</div>
@@ -1064,6 +1115,18 @@ function PaymentsView({sales,setSales,settlements,setSettlements,settings}){
                 <div style={{textAlign:"right"}}>
                   <div style={{fontSize:8,color:C.dim}}>{settings.partnerB}</div>
                   <div style={{fontSize:12,color:C.sub}}>{sol(r.shareB,2)}</div>
+                </div>
+                <div style={{display:"flex",gap:5,marginLeft:6}}>
+                  <button onClick={()=>editSettlement(r)} title="Editar liquidación"
+                    style={{background:"transparent",border:"none",color:C.dim,cursor:"pointer",
+                      fontSize:11,padding:2,lineHeight:1,fontFamily:"inherit",transition:"color 0.15s"}}
+                    onMouseEnter={e=>e.target.style.color=C.gold}
+                    onMouseLeave={e=>e.target.style.color=C.dim}>✎</button>
+                  <button onClick={()=>deleteSettlement(r)} title="Eliminar liquidación"
+                    style={{background:"transparent",border:"none",color:C.dim,cursor:"pointer",
+                      fontSize:13,padding:2,lineHeight:1,fontFamily:"inherit",transition:"color 0.15s"}}
+                    onMouseEnter={e=>e.target.style.color=C.err}
+                    onMouseLeave={e=>e.target.style.color=C.dim}>×</button>
                 </div>
               </div>
             </div>
