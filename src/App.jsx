@@ -896,9 +896,9 @@ function ImportView({imp,setImp,settings}){
                 onChange={e=>setDraft(p=>({...p,customs:parseFloat(e.target.value)||0}))}/>
               <Field label="REEMPAQUE" value={draft.repack}
                 onChange={e=>setDraft(p=>({...p,repack:parseFloat(e.target.value)||0}))}/>
-              <Field label="SHALOM/COMBI" value={draft.local}
+              <Field label="SHALOM" value={draft.local}
                 onChange={e=>setDraft(p=>({...p,local:parseFloat(e.target.value)||0}))}/>
-              <Field label="PASAJES" value={draft.travel}
+              <Field label="PASAJES/COMBI" value={draft.travel}
                 onChange={e=>setDraft(p=>({...p,travel:parseFloat(e.target.value)||0}))}/>
             </div>
 
@@ -1019,9 +1019,9 @@ function ImportView({imp,setImp,settings}){
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:9}}>
                   <Field label="REEMPAQUE" value={selected.repack}
                     onChange={e=>updBatch("repack",e.target.value)}/>
-                  <Field label="SHALOM/COMBI" value={selected.local}
+                  <Field label="SHALOM" value={selected.local}
                     onChange={e=>updBatch("local",e.target.value)}/>
-                  <Field label="PASAJES" value={selected.travel}
+                  <Field label="PASAJES/COMBI" value={selected.travel}
                     onChange={e=>updBatch("travel",e.target.value)}/>
                 </div>
                 <Sub label="Total logística (S/)" value={R.log}/>
