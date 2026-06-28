@@ -71,19 +71,28 @@ const DEFAULT_INVENTORY = [
 
 const DEFAULT_SALES = [];
 
+// Un "item" dentro de un lote: perfume individual con precio y unidades propias
+const EMPTY_BATCH_ITEM = { id:0, name:"", priceUSD:0, units:1, discount:0 };
+
+// Un lote completo: costos logísticos compartidos + array de perfumes (items)
 const EMPTY_IMPORT_DRAFT = {
-  name:"",priceUSD:0,units:1,
-  discount:0,tax:8,tc:3.72,ship:0,customs:0,
-  repack:0,local:0,travel:0,splitE:65,
+  label:"",
+  tc:3.72, tax:8, splitE:65,
+  ship:0, customs:0, repack:0, local:0, travel:0,
+  items:[{ ...EMPTY_BATCH_ITEM, id:1 }],
 };
 
 const DEFAULT_IMPORT = [
   {
     id:1,
     createdAt:"1 Ene 2025",
-    name:"Creed Aventus 100ml",priceUSD:120,units:5,
-    discount:0,tax:8,tc:3.72,ship:150,customs:80,
-    repack:20,local:15,travel:0,splitE:65,
+    label:"Lote inaugural",
+    tc:3.72, tax:8, splitE:65,
+    ship:150, customs:80, repack:20, local:15, travel:0,
+    items:[
+      { id:11, name:"Creed Aventus 100ml",   priceUSD:120, units:5, discount:0 },
+      { id:12, name:"Tom Ford Oud Wood 50ml", priceUSD:95,  units:2, discount:5 },
+    ],
   },
 ];
 
@@ -131,9 +140,33 @@ async function loadStore(){
       .eq('key', STORE_KEY).single()
     if(data){
       const parsed = JSON.parse(data.data);
-      // ── MIGRATION: imp was a single object, now it's an array ──
+      // ── MIGRATION v1: imp was a single object → wrap in array ──
       if(parsed.imp && !Array.isArray(parsed.imp)){
-        parsed.imp = [{ ...parsed.imp, id: Date.now(), createdAt: todayFull() }];
+        const old = parsed.imp;
+        parsed.imp = [{
+          id: Date.now(), createdAt: todayFull(),
+          label: old.name || "Lote importado",
+          tc: old.tc||3.72, tax: old.tax||8, splitE: old.splitE||65,
+          ship: old.ship||0, customs: old.customs||0,
+          repack: old.repack||0, local: old.local||0, travel: old.travel||0,
+          items:[{ id: Date.now()+1, name: old.name||"Producto",
+            priceUSD: old.priceUSD||0, units: old.units||1, discount: old.discount||0 }],
+        }];
+      }
+      // ── MIGRATION v2: batch items used to be flat fields, not items[] array ──
+      if(Array.isArray(parsed.imp)){
+        parsed.imp = parsed.imp.map(b => {
+          if(!b.items){
+            return {
+              ...b,
+              label: b.label || b.name || "Lote",
+              items:[{ id: Date.now()+Math.random()*1000|0,
+                name: b.name||"Producto", priceUSD: b.priceUSD||0,
+                units: b.units||1, discount: b.discount||0 }],
+            };
+          }
+          return b;
+        });
       }
       return { ...defaults, ...parsed };
     }
@@ -590,50 +623,122 @@ function DashView({sim,setSim,inventory,sales,setSales,settings,setSettings}){
 }
 
 // ── IMPORT VIEW ─────────────────────────────────────────────────────────────
+// ── Helper: compute full batch totals from multi-item structure ─────────────
+function calcBatch(b){
+  const log = (b.ship||0)+(b.customs||0)+(b.repack||0)+(b.local||0)+(b.travel||0);
+  const items = (b.items||[]);
+  const totalUnits = items.reduce((a,it)=>a+(it.units||0),0);
+
+  // Per-item calculations
+  const enriched = items.map(it=>{
+    const baseUSD  = (it.priceUSD||0)*(it.units||0)*(1-(it.discount||0)/100);
+    const basePEN  = baseUSD*(b.tc||1);
+    const taxAmt   = basePEN*((b.tax||0)/100);
+    const prodCost = basePEN+taxAmt;
+    return { ...it, baseUSD, basePEN, taxAmt, prodCost };
+  });
+
+  const totalProd = enriched.reduce((a,it)=>a+it.prodCost,0);
+  const totalCost = totalProd+log;
+
+  // Logistics prorated proportionally to prodCost weight
+  const withLog = enriched.map(it=>{
+    const logShare = totalProd>0 ? log*(it.prodCost/totalProd) : (totalUnits>0 ? log*(it.units/totalUnits) : 0);
+    const itemTotal = it.prodCost+logShare;
+    const unitCost  = it.units>0 ? itemTotal/it.units : 0;
+    return { ...it, logShare, itemTotal, unitCost };
+  });
+
+  return { log, totalUnits, totalProd, totalCost, items: withLog };
+}
+
 function ImportView({imp,setImp,settings}){
-  // imp is now an array of batches; selectedId tracks which is active
   const batches = Array.isArray(imp) ? imp : [imp];
   const [selectedId,setSelectedId] = useState(()=> batches.length>0 ? batches[0].id : null);
   const [creating,setCreating] = useState(false);
-  const [draft,setDraft] = useState({...EMPTY_IMPORT_DRAFT});
+  const [draft,setDraft] = useState({
+    ...EMPTY_IMPORT_DRAFT,
+    tc:settings.tc, splitE:settings.splitDefault,
+    items:[{ ...EMPTY_BATCH_ITEM, id: Date.now() }],
+  });
 
   const selected = batches.find(b=>b.id===selectedId) || batches[0] || null;
+  const R = selected ? calcBatch(selected) : null;
 
-  const upd = (f,v) => {
+  // ── patch a top-level batch field ──
+  const updBatch = (f,v) => {
     setImp(prev=>{
-      const arr = Array.isArray(prev) ? prev : [prev];
-      return arr.map(b=>b.id===selectedId ? {...b,[f]:f==="name"?v:(parseFloat(v)||0)} : b);
+      const arr = Array.isArray(prev)?prev:[prev];
+      return arr.map(b=>b.id===selectedId ? {...b,[f]:f==="label"?v:(parseFloat(v)||0)} : b);
+    });
+  };
+
+  // ── patch a single item inside selected batch ──
+  const updItem = (itemId, f, v) => {
+    setImp(prev=>{
+      const arr = Array.isArray(prev)?prev:[prev];
+      return arr.map(b=> b.id!==selectedId ? b : {
+        ...b,
+        items: b.items.map(it=> it.id!==itemId ? it :
+          {...it, [f]: f==="name" ? v : (parseFloat(v)||0)}
+        )
+      });
+    });
+  };
+
+  const addItem = () => {
+    setImp(prev=>{
+      const arr = Array.isArray(prev)?prev:[prev];
+      const newItem = { ...EMPTY_BATCH_ITEM, id: Date.now() };
+      return arr.map(b=> b.id!==selectedId ? b :
+        {...b, items:[...(b.items||[]), newItem]}
+      );
+    });
+  };
+
+  const removeItem = (itemId) => {
+    setImp(prev=>{
+      const arr = Array.isArray(prev)?prev:[prev];
+      return arr.map(b=> b.id!==selectedId ? b :
+        {...b, items:(b.items||[]).filter(it=>it.id!==itemId)}
+      );
     });
   };
 
   const syncFromSettings = () => {
     setImp(prev=>{
-      const arr = Array.isArray(prev) ? prev : [prev];
-      return arr.map(b=>b.id===selectedId ? {...b,tc:settings.tc,splitE:settings.splitDefault} : b);
+      const arr = Array.isArray(prev)?prev:[prev];
+      return arr.map(b=> b.id!==selectedId ? b :
+        {...b, tc:settings.tc, splitE:settings.splitDefault}
+      );
     });
   };
 
   const saveDraft = () => {
-    if(!draft.name.trim()) return;
+    if(!draft.label.trim() || !(draft.items||[]).some(it=>it.name.trim())) return;
     const newBatch = {
       ...draft,
       id: Date.now(),
       createdAt: todayFull(),
+      items: (draft.items||[]).filter(it=>it.name.trim()),
     };
     setImp(prev=>{
-      const arr = Array.isArray(prev) ? prev : [prev];
-      return [newBatch, ...arr];
+      const arr = Array.isArray(prev)?prev:[prev];
+      return [newBatch,...arr];
     });
     setSelectedId(newBatch.id);
     setCreating(false);
-    setDraft({...EMPTY_IMPORT_DRAFT});
+    setDraft({
+      ...EMPTY_IMPORT_DRAFT,
+      tc:settings.tc, splitE:settings.splitDefault,
+      items:[{ ...EMPTY_BATCH_ITEM, id: Date.now()+1 }],
+    });
   };
 
   const removeBatch = (id) => {
     setImp(prev=>{
-      const arr = Array.isArray(prev) ? prev : [prev];
-      const next = arr.filter(b=>b.id!==id);
-      return next;
+      const arr = Array.isArray(prev)?prev:[prev];
+      return arr.filter(b=>b.id!==id);
     });
     if(selectedId===id){
       const remaining = batches.filter(b=>b.id!==id);
@@ -641,34 +746,100 @@ function ImportView({imp,setImp,settings}){
     }
   };
 
-  const R = selected ? (() => {
-    const bUSD = selected.priceUSD * selected.units * (1 - selected.discount/100);
-    const bPEN = bUSD * selected.tc;
-    const tax  = bPEN * (selected.tax/100);
-    const prod = bPEN + tax;
-    const log  = selected.ship + selected.customs + selected.repack + selected.local + selected.travel;
-    const total = prod + log;
-    const unit  = selected.units>0 ? total/selected.units : 0;
-    const logU  = selected.units>0 ? log/selected.units : 0;
-    return {bUSD,bPEN,tax,prod,log,total,unit,logU};
-  })() : null;
-
-  const RRow = ({label,value,accent,large,isLight}) => (
+  // ── mini components scoped here ──
+  const RRow = ({label,value,accent,large,isLight,dim}) => (
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-      padding:"7px 0",borderBottom:`1px solid ${C.brd}`}}>
-      <div style={{fontSize:9.5,color:isLight?C.dim:C.sub}}>{label}</div>
-      <div style={{fontSize:large?20:12.5,fontWeight:large?200:400,color:accent?C.gold:C.text}}>
+      padding:"6px 0",borderBottom:`1px solid ${C.brd}`}}>
+      <div style={{fontSize:9.5,color:isLight||dim?C.dim:C.sub}}>{label}</div>
+      <div style={{fontSize:large?18:12.5,fontWeight:large?200:400,color:accent?C.gold:C.text}}>
         {sol(value,2)}
       </div>
     </div>
   );
+
   const Sub = ({label,value}) => (
-    <div style={{padding:"9px 12px",background:C.el,borderRadius:3,
+    <div style={{padding:"8px 11px",background:C.el,borderRadius:3,
       display:"flex",justifyContent:"space-between",marginTop:4}}>
       <span style={{fontSize:9.5,color:C.dim}}>{label}</span>
-      <span style={{fontSize:12.5,color:C.sub}}>{sol(value,2)}</span>
+      <span style={{fontSize:12,color:C.sub}}>{sol(value,2)}</span>
     </div>
   );
+
+  // ── Draft item editor (used while creating a new batch) ──
+  const DraftItemRow = ({it, idx}) => (
+    <div style={{display:"grid",gridTemplateColumns:"1fr 80px 70px 70px 24px",
+      gap:8,alignItems:"flex-end",
+      padding:"10px 12px",background:C.bg,borderRadius:3,border:`1px solid ${C.brd}`,marginBottom:6}}>
+      <Field label={idx===0?"PERFUME / MODELO":""} type="text" value={it.name}
+        onChange={e=>setDraft(p=>({
+          ...p,items:p.items.map(x=>x.id===it.id?{...x,name:e.target.value}:x)
+        }))}/>
+      <Field label={idx===0?"USD UNIT":""} prefix="$" value={it.priceUSD}
+        onChange={e=>setDraft(p=>({
+          ...p,items:p.items.map(x=>x.id===it.id?{...x,priceUSD:parseFloat(e.target.value)||0}:x)
+        }))}/>
+      <Field label={idx===0?"UNIDADES":""} step="1" value={it.units}
+        onChange={e=>setDraft(p=>({
+          ...p,items:p.items.map(x=>x.id===it.id?{...x,units:parseFloat(e.target.value)||0}:x)
+        }))}/>
+      <Field label={idx===0?"DESC%":""} prefix="%" value={it.discount}
+        onChange={e=>setDraft(p=>({
+          ...p,items:p.items.map(x=>x.id===it.id?{...x,discount:parseFloat(e.target.value)||0}:x)
+        }))}/>
+      <button onClick={()=>setDraft(p=>({...p,items:p.items.filter(x=>x.id!==it.id)}))}
+        disabled={(draft.items||[]).length<=1}
+        style={{background:"transparent",border:"none",color:C.dim,cursor:(draft.items||[]).length>1?"pointer":"default",
+          fontSize:15,padding:0,lineHeight:1,fontFamily:"inherit",marginTop:draft.items&&draft.items.indexOf(it)===0?16:0,
+          opacity:(draft.items||[]).length>1?1:0.3}}>×</button>
+    </div>
+  );
+
+  // ── Existing batch item row (editable inline) ──
+  const ItemRow = ({it, bR}) => {
+    const ri = bR.items.find(x=>x.id===it.id) || it;
+    return(
+      <div style={{background:C.bg,borderRadius:3,border:`1px solid ${C.brd}`,
+        padding:"12px 14px",marginBottom:6}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 90px 70px 70px 24px",
+          gap:8,alignItems:"flex-end",marginBottom: ri.unitCost>0 ? 10 : 0}}>
+          <Field label="PERFUME / MODELO" type="text" value={it.name}
+            onChange={e=>updItem(it.id,"name",e.target.value)}/>
+          <Field label="USD UNIT" prefix="$" value={it.priceUSD}
+            onChange={e=>updItem(it.id,"priceUSD",e.target.value)}/>
+          <Field label="UNIDADES" step="1" value={it.units}
+            onChange={e=>updItem(it.id,"units",e.target.value)}/>
+          <Field label="DESC%" prefix="%" value={it.discount}
+            onChange={e=>updItem(it.id,"discount",e.target.value)}/>
+          <button onClick={()=>removeItem(it.id)}
+            disabled={(selected.items||[]).length<=1}
+            title="Eliminar este perfume"
+            style={{background:"transparent",border:"none",
+              color:(selected.items||[]).length>1?C.dim:"transparent",
+              cursor:(selected.items||[]).length>1?"pointer":"default",
+              fontSize:15,padding:0,lineHeight:1,fontFamily:"inherit",paddingTop:16,
+              transition:"color 0.15s"}}
+            onMouseEnter={ev=>{ if((selected.items||[]).length>1) ev.target.style.color=C.err; }}
+            onMouseLeave={ev=>ev.target.style.color=C.dim}>×</button>
+        </div>
+        {ri.unitCost>0 && (
+          <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
+            <div style={{fontSize:8.5,color:C.dim}}>
+              Costo producto: <span style={{color:C.text}}>{sol(ri.prodCost,2)}</span>
+            </div>
+            <div style={{fontSize:8.5,color:C.dim}}>
+              Logística aplicada: <span style={{color:C.text}}>{sol(ri.logShare,2)}</span>
+            </div>
+            <div style={{fontSize:8.5,color:C.dim}}>
+              Total ítem: <span style={{color:C.text}}>{sol(ri.itemTotal,2)}</span>
+            </div>
+            <div style={{fontSize:9,color:C.gold,fontWeight:600}}>
+              Costo/unidad: {sol(ri.unitCost,2)}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return(
     <div style={{height:"100vh",overflowY:"auto",padding:28}}>
@@ -676,7 +847,7 @@ function ImportView({imp,setImp,settings}){
         <div style={{fontSize:9,letterSpacing:"0.35em",color:C.gold,fontWeight:600}}>MÓDULO 01</div>
         <div style={{fontSize:22,fontWeight:300,marginTop:4}}>Motor de Costeo · Importación</div>
         <div style={{fontSize:10.5,color:C.dim,marginTop:5}}>
-          Los gastos logísticos se prorratean automáticamente por unidad importada. Cada lote guarda el TC y prorrateo exacto del momento.
+          Cada lote agrupa varios perfumes. Los costos logísticos se prorratean entre todos, proporcionalmente al costo de cada producto.
         </div>
       </div>
 
@@ -686,74 +857,85 @@ function ImportView({imp,setImp,settings}){
           <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,fontWeight:600}}>
             LOTES DE IMPORTACIÓN · {batches.length} registrado{batches.length!==1?"s":""}
           </div>
-          <button onClick={()=>{setCreating(c=>!c); setDraft({...EMPTY_IMPORT_DRAFT,tc:settings.tc,splitE:settings.splitDefault});}}
-            style={creating ? btnGhost : btnGold}>
-            {creating ? "✕ Cancelar" : "+ Nuevo lote"}
+          <button onClick={()=>{ setCreating(c=>!c); }}
+            style={creating?btnGhost:btnGold}>
+            {creating?"✕ Cancelar":"+  Nuevo lote"}
           </button>
         </div>
 
+        {/* ── NEW BATCH FORM ── */}
         {creating && (
-          <div style={{background:C.el,borderRadius:3,padding:"14px 16px",marginBottom:14,
+          <div style={{background:C.el,borderRadius:3,padding:"16px 18px",marginBottom:14,
             border:`1px solid ${C.gold}33`}}>
-            <div style={{fontSize:8,letterSpacing:"0.2em",color:C.gold,marginBottom:10,fontWeight:600}}>NUEVO LOTE</div>
-            <div style={{display:"flex",flexDirection:"column",gap:9}}>
-              <Field label="NOMBRE DEL PRODUCTO" type="text" value={draft.name}
-                onChange={e=>setDraft(p=>({...p,name:e.target.value}))}/>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:9}}>
-                <Field label="PRECIO USD" prefix="USD" value={draft.priceUSD}
-                  onChange={e=>setDraft(p=>({...p,priceUSD:parseFloat(e.target.value)||0}))}/>
-                <Field label="UNIDADES" step="1" value={draft.units}
-                  onChange={e=>setDraft(p=>({...p,units:parseFloat(e.target.value)||0}))}/>
+            <div style={{fontSize:8,letterSpacing:"0.2em",color:C.gold,marginBottom:12,fontWeight:600}}>
+              NUEVO LOTE
+            </div>
+
+            {/* Batch label + global params */}
+            <div style={{display:"flex",flexDirection:"column",gap:9,marginBottom:14}}>
+              <Field label="NOMBRE DEL LOTE (ej: Importación Julio 2025)" type="text" value={draft.label}
+                onChange={e=>setDraft(p=>({...p,label:e.target.value}))}/>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9}}>
                 <Field label="TIPO DE CAMBIO" prefix="S/" value={draft.tc}
                   onChange={e=>setDraft(p=>({...p,tc:parseFloat(e.target.value)||0}))}/>
+                <Field label="ARANCELES / TAXES" prefix="%" value={draft.tax}
+                  onChange={e=>setDraft(p=>({...p,tax:parseFloat(e.target.value)||0}))}/>
                 <Field label={`SPLIT ${settings.partnerA.toUpperCase()}%`} prefix="%" value={draft.splitE}
                   onChange={e=>setDraft(p=>({...p,splitE:parseFloat(e.target.value)||0}))}/>
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:9}}>
-                <Field label="DESCUENTO %" prefix="%" value={draft.discount}
-                  onChange={e=>setDraft(p=>({...p,discount:parseFloat(e.target.value)||0}))}/>
-                <Field label="ARANCELES %" prefix="%" value={draft.tax}
-                  onChange={e=>setDraft(p=>({...p,tax:parseFloat(e.target.value)||0}))}/>
-                <Field label="ENVÍO USA→PE" value={draft.ship}
-                  onChange={e=>setDraft(p=>({...p,ship:parseFloat(e.target.value)||0}))}/>
-                <Field label="DESADUANAJE" value={draft.customs}
-                  onChange={e=>setDraft(p=>({...p,customs:parseFloat(e.target.value)||0}))}/>
+            </div>
+
+            {/* Logistics */}
+            <div style={{fontSize:8,letterSpacing:"0.18em",color:C.dim,marginBottom:8,fontWeight:600}}>
+              COSTOS LOGÍSTICOS COMPARTIDOS (S/)
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:9,marginBottom:14}}>
+              <Field label="ENVÍO USA→PE" value={draft.ship}
+                onChange={e=>setDraft(p=>({...p,ship:parseFloat(e.target.value)||0}))}/>
+              <Field label="DESADUANAJE" value={draft.customs}
+                onChange={e=>setDraft(p=>({...p,customs:parseFloat(e.target.value)||0}))}/>
+              <Field label="REEMPAQUE" value={draft.repack}
+                onChange={e=>setDraft(p=>({...p,repack:parseFloat(e.target.value)||0}))}/>
+              <Field label="SHALOM/COMBI" value={draft.local}
+                onChange={e=>setDraft(p=>({...p,local:parseFloat(e.target.value)||0}))}/>
+              <Field label="PASAJES" value={draft.travel}
+                onChange={e=>setDraft(p=>({...p,travel:parseFloat(e.target.value)||0}))}/>
+            </div>
+
+            {/* Items */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <div style={{fontSize:8,letterSpacing:"0.18em",color:C.dim,fontWeight:600}}>
+                PERFUMES EN ESTE LOTE
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9}}>
-                <Field label="REEMPAQUE" value={draft.repack}
-                  onChange={e=>setDraft(p=>({...p,repack:parseFloat(e.target.value)||0}))}/>
-                <Field label="SHALOM/COMBI" value={draft.local}
-                  onChange={e=>setDraft(p=>({...p,local:parseFloat(e.target.value)||0}))}/>
-                <Field label="PASAJES" value={draft.travel}
-                  onChange={e=>setDraft(p=>({...p,travel:parseFloat(e.target.value)||0}))}/>
-              </div>
-              <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
-                <button onClick={()=>{setCreating(false);setDraft({...EMPTY_IMPORT_DRAFT});}} style={btnGhost}>Cancelar</button>
-                <button onClick={saveDraft} disabled={!draft.name.trim()}
-                  style={{...btnGold,opacity:draft.name.trim()?1:0.4}}>
-                  ✓ Guardar lote
-                </button>
-              </div>
+              <button onClick={()=>setDraft(p=>({
+                  ...p,items:[...(p.items||[]),{...EMPTY_BATCH_ITEM,id:Date.now()}]
+                }))} style={{...btnGhost,padding:"3px 9px",fontSize:8.5}}>
+                + Agregar perfume
+              </button>
+            </div>
+            {(draft.items||[]).map((it,idx)=>(
+              <DraftItemRow key={it.id} it={it} idx={idx}/>
+            ))}
+
+            <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:10}}>
+              <button onClick={()=>setCreating(false)} style={btnGhost}>Cancelar</button>
+              <button onClick={saveDraft}
+                disabled={!draft.label.trim()||(draft.items||[]).every(it=>!it.name.trim())}
+                style={{...btnGold,
+                  opacity:draft.label.trim()&&(draft.items||[]).some(it=>it.name.trim())?1:0.4}}>
+                ✓ Guardar lote
+              </button>
             </div>
           </div>
         )}
 
-        {/* Batch list */}
+        {/* ── BATCH LIST ── */}
         <div style={{display:"flex",flexDirection:"column",gap:6}}>
           {batches.length===0 && (
-            <div style={{fontSize:10,color:C.dim,padding:"8px 0"}}>No hay lotes registrados. Crea el primero.</div>
+            <div style={{fontSize:10,color:C.dim,padding:"8px 0"}}>No hay lotes. Crea el primero.</div>
           )}
           {batches.map(b=>{
-            const bR = (()=>{
-              const bUSD2 = b.priceUSD * b.units * (1 - b.discount/100);
-              const bPEN2 = bUSD2 * b.tc;
-              const tax2  = bPEN2 * (b.tax/100);
-              const prod2 = bPEN2 + tax2;
-              const log2  = b.ship + b.customs + b.repack + b.local + b.travel;
-              const total2 = prod2 + log2;
-              const unit2  = b.units>0 ? total2/b.units : 0;
-              return {total:total2,unit:unit2};
-            })();
+            const bR = calcBatch(b);
             const isActive = selectedId===b.id;
             return(
               <div key={b.id} onClick={()=>setSelectedId(b.id)}
@@ -765,17 +947,17 @@ function ImportView({imp,setImp,settings}){
                 <div style={{width:6,height:6,borderRadius:"50%",flexShrink:0,
                   background:isActive?C.gold:C.dim}}/>
                 <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:11,color:isActive?C.text:C.sub,
-                    fontWeight:isActive?500:400,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                    {b.name||"Sin nombre"}
+                  <div style={{fontSize:11,color:isActive?C.text:C.sub,fontWeight:isActive?500:400,
+                    overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    {b.label||"Sin nombre"}
                   </div>
                   <div style={{fontSize:8.5,color:C.dim,marginTop:2}}>
-                    {b.createdAt} · TC {b.tc} · {b.units}u
+                    {b.createdAt} · TC {b.tc} · {bR.totalUnits}u · {(b.items||[]).length} perfume{(b.items||[]).length!==1?"s":""}
                   </div>
                 </div>
                 <div style={{textAlign:"right",flexShrink:0}}>
-                  <div style={{fontSize:12,color:isActive?C.gold:C.sub}}>{sol(bR.total,0)}</div>
-                  <div style={{fontSize:8.5,color:C.dim}}>{sol(bR.unit,2)}/u</div>
+                  <div style={{fontSize:12,color:isActive?C.gold:C.sub}}>{sol(bR.totalCost,0)}</div>
+                  <div style={{fontSize:8.5,color:C.dim}}>costo total</div>
                 </div>
                 <button onClick={e=>{e.stopPropagation();removeBatch(b.id);}}
                   title="Eliminar lote"
@@ -793,100 +975,125 @@ function ImportView({imp,setImp,settings}){
       {/* ── SELECTED BATCH EDITOR ── */}
       {selected && R && (
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-          {/* LEFT */}
+
+          {/* LEFT — inputs */}
           <div style={{display:"flex",flexDirection:"column",gap:14}}>
+
+            {/* Batch metadata */}
             <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                 <div>
                   <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,fontWeight:600}}>IDENTIFICACIÓN DEL LOTE</div>
-                  {selected.createdAt && (
-                    <div style={{fontSize:8.5,color:C.dim,marginTop:3}}>Registrado: {selected.createdAt}</div>
-                  )}
+                  {selected.createdAt&&<div style={{fontSize:8.5,color:C.dim,marginTop:3}}>Registrado: {selected.createdAt}</div>}
                 </div>
                 <button onClick={syncFromSettings} style={{...btnGhost,padding:"4px 9px",fontSize:8.5}}>
-                  ↺ usar TC/Split de Config.
+                  ↺ TC/Split de Config.
                 </button>
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:9}}>
-                <Field label="NOMBRE DEL PRODUCTO" type="text" value={selected.name}
-                  onChange={e=>upd("name",e.target.value)}/>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
-                  <Field label="TIPO DE CAMBIO (fijado al registrar)" prefix="S/" value={selected.tc}
-                    onChange={e=>upd("tc",e.target.value)}/>
-                  <Field label={`SPLIT ${settings.partnerA.toUpperCase()}`} prefix="%" value={selected.splitE}
-                    onChange={e=>upd("splitE",e.target.value)}/>
+                <Field label="NOMBRE DEL LOTE" type="text" value={selected.label||""}
+                  onChange={e=>updBatch("label",e.target.value)}/>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:9}}>
+                  <Field label="TIPO DE CAMBIO" prefix="S/" value={selected.tc}
+                    onChange={e=>updBatch("tc",e.target.value)}/>
+                  <Field label="ARANCELES%" prefix="%" value={selected.tax}
+                    onChange={e=>updBatch("tax",e.target.value)}/>
+                  <Field label={`SPLIT ${settings.partnerA.toUpperCase()}%`} prefix="%" value={selected.splitE}
+                    onChange={e=>updBatch("splitE",e.target.value)}/>
                 </div>
               </div>
             </div>
 
+            {/* Logistics costs */}
             <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px"}}>
               <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:12,fontWeight:600}}>
-                COMPRA EN ORIGEN (USA)
-              </div>
-              <div style={{display:"flex",flexDirection:"column",gap:9}}>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
-                  <Field label="PRECIO UNITARIO" prefix="USD" value={selected.priceUSD}
-                    onChange={e=>upd("priceUSD",e.target.value)}/>
-                  <Field label="UNIDADES" step="1" value={selected.units}
-                    onChange={e=>upd("units",e.target.value)}/>
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
-                  <Field label="DESCUENTO" prefix="%" value={selected.discount}
-                    onChange={e=>upd("discount",e.target.value)}/>
-                  <Field label="ARANCELES / TAXES" prefix="%" value={selected.tax}
-                    onChange={e=>upd("tax",e.target.value)}/>
-                </div>
-                <Sub label="Subtotal producto (S/)" value={R.prod}/>
-              </div>
-            </div>
-
-            <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px"}}>
-              <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:12,fontWeight:600}}>
-                COSTOS LOGÍSTICOS (S/)
+                COSTOS LOGÍSTICOS COMPARTIDOS (S/)
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:9}}>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
                   <Field label="ENVÍO USA → PERÚ" value={selected.ship}
-                    onChange={e=>upd("ship",e.target.value)}/>
+                    onChange={e=>updBatch("ship",e.target.value)}/>
                   <Field label="DESADUANAJE" value={selected.customs}
-                    onChange={e=>upd("customs",e.target.value)}/>
+                    onChange={e=>updBatch("customs",e.target.value)}/>
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:9}}>
                   <Field label="REEMPAQUE" value={selected.repack}
-                    onChange={e=>upd("repack",e.target.value)}/>
+                    onChange={e=>updBatch("repack",e.target.value)}/>
                   <Field label="SHALOM/COMBI" value={selected.local}
-                    onChange={e=>upd("local",e.target.value)}/>
+                    onChange={e=>updBatch("local",e.target.value)}/>
                   <Field label="PASAJES" value={selected.travel}
-                    onChange={e=>upd("travel",e.target.value)}/>
+                    onChange={e=>updBatch("travel",e.target.value)}/>
                 </div>
                 <Sub label="Total logística (S/)" value={R.log}/>
               </div>
             </div>
+
+            {/* Items list */}
+            <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,fontWeight:600}}>
+                  PERFUMES EN EL LOTE · {(selected.items||[]).length} modelo{(selected.items||[]).length!==1?"s":""}
+                </div>
+                <button onClick={addItem} style={{...btnGhost,padding:"3px 9px",fontSize:8.5}}>
+                  + Agregar perfume
+                </button>
+              </div>
+              {(selected.items||[]).map(it=>(
+                <ItemRow key={it.id} it={it} bR={R}/>
+              ))}
+              {(selected.items||[]).length===0&&(
+                <div style={{fontSize:10,color:C.dim,padding:"6px 0"}}>Sin perfumes. Agrega al menos uno.</div>
+              )}
+            </div>
           </div>
 
-          {/* RIGHT */}
+          {/* RIGHT — results */}
           <div style={{display:"flex",flexDirection:"column",gap:14}}>
+
+            {/* Summary */}
             <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px"}}>
               <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:12,fontWeight:600}}>
-                DESGLOSE FINAL
+                RESUMEN DEL LOTE
               </div>
-              <RRow label="Base USD convertida" value={R.bPEN}/>
-              <RRow label={`Aranceles (${selected.tax}%)`} value={R.tax}/>
-              <RRow label="Subtotal Producto" value={R.prod}/>
-              <RRow label="Total Logística" value={R.log}/>
-              <div style={{height:1,background:C.gold,opacity:0.2,margin:"10px 0"}}/>
-              <RRow label="COSTO TOTAL (S/)" value={R.total} large accent/>
-              <RRow label={`Costo / Unidad (${selected.units}u)`} value={R.unit} accent/>
-              <RRow label="Logística / Unidad" value={R.logU} isLight/>
+              <RRow label="Subtotal productos (S/)" value={R.totalProd}/>
+              <RRow label="Total logística (S/)" value={R.log} isLight/>
+              <div style={{height:1,background:C.gold,opacity:0.2,margin:"8px 0"}}/>
+              <RRow label={`COSTO TOTAL · ${R.totalUnits}u`} value={R.totalCost} large accent/>
             </div>
 
+            {/* Per-item breakdown table */}
+            <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px"}}>
+              <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:12,fontWeight:600}}>
+                COSTO / UNIDAD POR PERFUME
+              </div>
+              {R.items.map((ri,idx)=>(
+                <div key={ri.id} style={{marginBottom: idx<R.items.length-1?10:0}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4}}>
+                    <div style={{fontSize:10.5,color:C.text,overflow:"hidden",textOverflow:"ellipsis",
+                      whiteSpace:"nowrap",maxWidth:"55%"}}>{ri.name||`Perfume ${idx+1}`}</div>
+                    <div style={{fontSize:16,fontWeight:200,color:C.gold,flexShrink:0}}>{sol(ri.unitCost,2)}/u</div>
+                  </div>
+                  <div style={{display:"flex",gap:12,fontSize:8.5,color:C.dim,flexWrap:"wrap"}}>
+                    <span>{ri.units}u · USD {ri.priceUSD}{ri.discount>0?` · -${ri.discount}%`:""}</span>
+                    <span>Prod: {sol(ri.prodCost,2)}</span>
+                    <span>Log: {sol(ri.logShare,2)}</span>
+                  </div>
+                  {idx<R.items.length-1&&<div style={{height:1,background:C.brd,marginTop:10}}/>}
+                </div>
+              ))}
+              {R.items.length===0&&(
+                <div style={{fontSize:10,color:C.dim}}>Agrega perfumes para ver el desglose.</div>
+              )}
+            </div>
+
+            {/* Capital por socio */}
             <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px"}}>
               <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:14,fontWeight:600}}>
                 CAPITAL INVERTIDO POR SOCIO
               </div>
               {[
-                [settings.partnerA, selected.splitE, R.total*(selected.splitE/100), C.gold],
-                [settings.partnerB, 100-selected.splitE, R.total*((100-selected.splitE)/100), C.sub],
+                [settings.partnerA, selected.splitE,         R.totalCost*(selected.splitE/100),         C.gold],
+                [settings.partnerB, 100-selected.splitE, R.totalCost*((100-selected.splitE)/100), C.sub],
               ].map(([name,pct,amount,color])=>(
                 <div key={name} style={{marginBottom:16}}>
                   <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
@@ -902,25 +1109,55 @@ function ImportView({imp,setImp,settings}){
               ))}
             </div>
 
+            {/* Composición */}
             <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"18px 20px"}}>
               <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:12,fontWeight:600}}>
                 COMPOSICIÓN DEL COSTO
               </div>
-              <div style={{display:"flex",height:6,borderRadius:3,overflow:"hidden",marginBottom:12}}>
-                {R.total>0 && [[R.prod,C.gold],[R.log,C.sub]].map(([v,col],i)=>(
-                  <div key={i} style={{flex:v,background:col,opacity:0.75}}/>
+              <div style={{display:"flex",height:6,borderRadius:3,overflow:"hidden",marginBottom:8}}>
+                {R.totalCost>0 && [[R.totalProd,C.gold],[R.log,C.sub]].map(([v,col],i)=>(
+                  <div key={i} style={{flex:v||0.001,background:col,opacity:0.75}}/>
                 ))}
               </div>
-              <div style={{display:"flex",gap:18}}>
-                {[["Producto",R.prod,C.gold],["Logística",R.log,C.sub]].map(([lbl,v,col])=>(
+              <div style={{display:"flex",gap:18,marginBottom:12}}>
+                {[["Producto",R.totalProd,C.gold],["Logística",R.log,C.sub]].map(([lbl,v,col])=>(
                   <div key={lbl} style={{display:"flex",alignItems:"center",gap:6}}>
                     <div style={{width:7,height:7,background:col,borderRadius:1,opacity:0.75}}/>
                     <span style={{fontSize:9,color:C.dim}}>
-                      {lbl} — {R.total>0?num((v/R.total)*100,1):0}%
+                      {lbl} — {R.totalCost>0?num((v/R.totalCost)*100,1):0}%
                     </span>
                   </div>
                 ))}
               </div>
+              {/* Per-item bar */}
+              {R.items.length>1 && (
+                <>
+                  <div style={{fontSize:8,letterSpacing:"0.15em",color:C.dim,marginBottom:6,marginTop:4}}>
+                    DISTRIBUCIÓN POR PERFUME
+                  </div>
+                  <div style={{display:"flex",height:6,borderRadius:3,overflow:"hidden",marginBottom:6}}>
+                    {R.items.map((ri,i)=>{
+                      const hues = [C.gold,"#7C9EFF","#FF9F7C","#7CFFB0","#FF7CA0","#C07CFF"];
+                      return <div key={ri.id} style={{flex:ri.itemTotal||0.001,
+                        background:hues[i%hues.length],opacity:0.8}}/>;
+                    })}
+                  </div>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:"4px 14px"}}>
+                    {R.items.map((ri,i)=>{
+                      const hues = [C.gold,"#7C9EFF","#FF9F7C","#7CFFB0","#FF7CA0","#C07CFF"];
+                      return(
+                        <div key={ri.id} style={{display:"flex",alignItems:"center",gap:5}}>
+                          <div style={{width:7,height:7,borderRadius:1,background:hues[i%hues.length],opacity:0.8}}/>
+                          <span style={{fontSize:8.5,color:C.dim,maxWidth:120,
+                            overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                            {ri.name||`Perfume ${i+1}`} — {R.totalCost>0?num((ri.itemTotal/R.totalCost)*100,1):0}%
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
