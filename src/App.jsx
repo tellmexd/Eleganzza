@@ -69,13 +69,7 @@ const DEFAULT_INVENTORY = [
   {id:5,name:"Byredo Bal d'Afrique",ml:50,stock:0,decantMl:120,decantSold:30,cost:310,splitE:65,ownership:"socio",ownerName:"Miguel"},
 ];
 
-const DEFAULT_SALES = [
-  {id:1,client:"Valentina R.",product:"Creed Aventus 5ml (Decant)",amount:85,status:"paid",date:"18 Jun",kind:"decant",itemId:1,ml:5,cost:21,splitE:65,paidToSocio:true,paidDate:"19 Jun",settlementId:null},
-  {id:2,client:"Diego M.",product:"TF Black Orchid 10ml (Decant)",amount:120,status:"pending",date:"17 Jun",kind:"decant",itemId:2,ml:10,cost:76,splitE:60,paidToSocio:false,paidDate:null,settlementId:null},
-  {id:3,client:"Sofía C.",product:"Promo 3×50ml",amount:240,status:"reserved",date:"16 Jun",kind:"otro",itemId:null,ml:null,cost:0,splitE:65,paidToSocio:false,paidDate:null,settlementId:null},
-  {id:4,client:"Andrés P.",product:"Initio OFG (Sellado)",amount:680,status:"paid",date:"15 Jun",kind:"sellada",itemId:4,ml:null,cost:520,splitE:70,paidToSocio:false,paidDate:null,settlementId:null},
-  {id:5,client:"Camila V.",product:"Byredo Bal 10ml (Decant)",amount:95,status:"pending",date:"14 Jun",kind:"decant",itemId:5,ml:10,cost:62,splitE:65,paidToSocio:false,paidDate:null,settlementId:null},
-];
+const DEFAULT_SALES = [];
 
 const DEFAULT_IMPORT = {
   name:"Creed Aventus 100ml",priceUSD:120,units:5,
@@ -388,9 +382,9 @@ function DashView({sim,setSim,inventory,sales,setSales,settings,setSettings}){
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
             <div>
               <div style={{fontSize:8,letterSpacing:"0.24em",color:C.dim,fontWeight:600}}>TENDENCIA · VENTAS NETAS</div>
-              <div style={{fontSize:24,fontWeight:200,marginTop:4}}>S/ 15,600</div>
+              <div style={{fontSize:24,fontWeight:200,marginTop:4}}>{sol(sales.reduce((a,s)=>a+s.amount,0),0)}</div>
             </div>
-            <span style={{fontSize:10,color:C.ok}}>↑ +29% vs. mes anterior</span>
+            <span style={{fontSize:10,color:C.dim}}>{sales.length} venta(s) registrada(s)</span>
           </div>
           <ResponsiveContainer width="100%" height={130}>
             <AreaChart data={TREND} margin={{top:4,right:4,bottom:0,left:0}}>
@@ -491,8 +485,11 @@ function DashView({sim,setSim,inventory,sales,setSales,settings,setSettings}){
           {addingSale && (
             <QuickSaleForm inventory={inventory} settings={settings} onAdd={addSale} onCancel={()=>setAddingSale(false)}/>
           )}
+          {sales.length===0 && (
+            <div style={{fontSize:10,color:C.dim,padding:"10px 0"}}>No hay ventas registradas aún.</div>
+          )}
           {sales.map(s=>(
-            <div key={s.id} style={{display:"grid",gridTemplateColumns:"52px 1fr 80px 90px",
+            <div key={s.id} style={{display:"grid",gridTemplateColumns:"52px 1fr 80px 90px 28px",
               gap:8,padding:"8px 0",borderBottom:`1px solid ${C.brd}`,alignItems:"center"}}>
               <div style={{fontSize:9,color:C.dim}}>{s.date}</div>
               <div>
@@ -501,6 +498,13 @@ function DashView({sim,setSim,inventory,sales,setSales,settings,setSettings}){
               </div>
               <div style={{fontSize:12.5,fontWeight:200}}>{sol(s.amount,0)}</div>
               <Badge status={s.status}/>
+              <button onClick={()=>setSales(prev=>prev.filter(x=>x.id!==s.id))}
+                title="Eliminar venta"
+                style={{background:"transparent",border:"none",color:C.dim,cursor:"pointer",
+                  fontSize:14,padding:0,lineHeight:1,fontFamily:"inherit",
+                  transition:"color 0.15s"}}
+                onMouseEnter={e=>e.target.style.color=C.err}
+                onMouseLeave={e=>e.target.style.color=C.dim}>×</button>
             </div>
           ))}
         </div>
@@ -897,6 +901,7 @@ function emptyExpenseRow(){ return {id:Date.now()+Math.random(), label:"", amoun
 
 function PaymentsView({sales,setSales,settlements,setSettlements,settings}){
   const eligible = useMemo(()=> sales.filter(s=>s.kind==="sellada" && s.status==="paid" && !s.settlementId), [sales]);
+  const allSelladas = useMemo(()=> sales.filter(s=>s.kind==="sellada"), [sales]);
   const [included,setIncluded] = useState({});
   const [expenses,setExpenses] = useState([emptyExpenseRow()]);
 
@@ -954,12 +959,20 @@ function PaymentsView({sales,setSales,settlements,setSettlements,settings}){
       </div>
 
       <div style={{background:C.card,border:`1px solid ${C.brd}`,borderRadius:4,padding:"16px 18px",marginBottom:14}}>
-        <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,marginBottom:10,fontWeight:600}}>
-          VENTAS SELLADAS COBRADAS · PENDIENTES DE LIQUIDAR
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+          <div style={{fontSize:8,letterSpacing:"0.22em",color:C.dim,fontWeight:600}}>
+            VENTAS SELLADAS COBRADAS · PENDIENTES DE LIQUIDAR
+          </div>
+          <div style={{fontSize:8.5,color:C.dim}}>{eligible.length} venta(s) · {chosen.length} seleccionada(s)</div>
         </div>
-        {eligible.length===0 ? (
+        {allSelladas.length===0 ? (
           <div style={{fontSize:10,color:C.dim,padding:"6px 0"}}>
-            No hay ventas selladas marcadas como "Pagado" pendientes de liquidar.
+            No hay ventas selladas registradas. Agrega una venta de tipo "Botella sellada" desde el Dashboard.
+          </div>
+        ) : eligible.length===0 && allSelladas.length>0 ? (
+          <div style={{fontSize:10,color:C.dim,padding:"6px 0"}}>
+            Todas las ventas selladas ya fueron liquidadas o están pendientes de cobro.
+            Marca las ventas como "Pagado" en el Dashboard para que aparezcan aquí.
           </div>
         ) : eligible.map(s=>(
           <div key={s.id} style={{display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${C.brd}`}}>
@@ -971,6 +984,12 @@ function PaymentsView({sales,setSales,settlements,setSettlements,settings}){
             </div>
             <div style={{fontSize:10,color:C.dim,width:90,textAlign:"right"}}>Costo {sol(s.cost||0,2)}</div>
             <div style={{fontSize:11,color:C.text,width:90,textAlign:"right"}}>{sol(s.amount,2)}</div>
+            <button onClick={()=>setSales(prev=>prev.filter(x=>x.id!==s.id))}
+              title="Eliminar esta venta"
+              style={{background:"transparent",border:"none",color:C.dim,cursor:"pointer",
+                fontSize:15,padding:0,lineHeight:1,fontFamily:"inherit",flexShrink:0}}
+              onMouseEnter={e=>e.target.style.color=C.err}
+              onMouseLeave={e=>e.target.style.color=C.dim}>×</button>
           </div>
         ))}
       </div>
