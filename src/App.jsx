@@ -2413,30 +2413,41 @@ export default function App(){
   const [lastSync,setLastSync] = useState(null);
   const [isMobileMenuOpen,setIsMobileMenuOpen] = useState(false);
   const saveTimer = useRef(null);
+  const pendingSaveRef = useRef(false);   // true while a local change hasn't been confirmed saved yet
+  const lastSavedJSON = useRef(null);     // last payload we know is persisted in Supabase
 
   useEffect(()=>{
     (async ()=>{
       const data = await loadStore();
       setStore(data);
+      lastSavedJSON.current = JSON.stringify(data);
       setSim(s=>({...s, splitE:data.settings.splitDefault}));
     })();
   },[]);
 
   useEffect(()=>{
     if(!store) return;
+    const json = JSON.stringify(store);
+    if(json === lastSavedJSON.current) return; // nothing actually changed since last confirmed save
+    pendingSaveRef.current = true;
     if(saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async ()=>{
       setSyncing(true);
       const ok = await saveStore(store);
       setSyncing(false);
       setSyncError(!ok);
-      if(ok) setLastSync(new Date());
+      if(ok){
+        setLastSync(new Date());
+        lastSavedJSON.current = json;
+        pendingSaveRef.current = false;
+      }
     }, 1500);
     return ()=>clearTimeout(saveTimer.current);
   },[store]);
 
   useEffect(()=>{
     const id = setInterval(async ()=>{
+      if(pendingSaveRef.current) return; // a local change is still being saved — never clobber it
       const tag = document.activeElement && document.activeElement.tagName;
       if(tag==="INPUT"||tag==="TEXTAREA"||tag==="SELECT") return;
       try{
@@ -2445,8 +2456,10 @@ export default function App(){
           const remote = JSON.parse(remoteData.data);
           setStore(prev=>{
             if(!prev) return prev;
+            if(pendingSaveRef.current) return prev; // re-check: a local edit may have started during the fetch
             if(JSON.stringify(remote)!==JSON.stringify(prev)){
               setLastSync(new Date());
+              lastSavedJSON.current = JSON.stringify(remote);
               return remote;
             }
             return prev;
@@ -2462,6 +2475,7 @@ export default function App(){
     try{
       const data = await loadStore();
       setStore(data);
+      lastSavedJSON.current = JSON.stringify(data);
       setLastSync(new Date());
       setSyncError(false);
     }catch(e){ setSyncError(true); }
